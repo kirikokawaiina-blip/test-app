@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>trpg鯖 トークン | ユニコーンJPOT版 v11</title>
-  <meta name="description" content="擬似トークンの送受領・権利マーケット（在庫/削除/返品）・朝活ストリーク・ギャンブル。JPOT送金は全員承認。権利の実行は買い手→売り手→買い手の3段階確認。ジャックポットはユーザーだが直接入金不可。" />
+  <title>trpg鯖 トークン | Cloudflare同期版 v12</title>
+  <meta name="description" content="擬似トークン送受領・権利マーケット（在庫/削除/返品）・朝活ストリーク・ギャンブル。ジャックポットはユーザーとして存在（直接入金不可）。Cloudflare WorkersのWebSocketを使ったルーム同期対応。" />
   <style>
     :root {
       --bg: #0b1220;
@@ -18,11 +18,11 @@
       --danger: #ef4444;
       --warn: #f59e0b;
       --ok: #22c55e;
-      --shadow: 0 8px 24px rgba(0,0,0,.35);
-      --radius: 16px;
+      --shadow: 0 10px 35px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.35);
+      --radius: 18px;
     }
     * { box-sizing: border-box; }
-    html, body { min-height: 100%; }
+    html, body { height: 100%; }
     body {
       margin: 0;
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif;
@@ -30,22 +30,17 @@
       background: radial-gradient(1200px 800px at 20% -10%, #11224e 0%, transparent 65%),
                   radial-gradient(800px 800px at 110% 10%, rgba(21,199,182,.15) 0%, transparent 55%),
                   linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
-      overflow-y: auto; /* ページ全体スクロールを許可 */
+      overflow-y: auto;
     }
-
-    header {
-      position: sticky; top: 0; z-index: 50;
-      backdrop-filter: saturate(120%) blur(14px);
-      background: linear-gradient(180deg, rgba(9,14,30,.85), rgba(12,18,38,.5));
-      border-bottom: 1px solid rgba(96,239,255,.12);
-    }
-    .nav { max-width: 1200px; margin: 0 auto; padding: 10px 14px; display: flex; align-items: center; gap: 10px; }
+    header { position: sticky; top: 0; z-index: 50; backdrop-filter: saturate(120%) blur(14px); background: linear-gradient(180deg, rgba(9,14,30,.8), rgba(12,18,38,.4)); border-bottom: 1px solid rgba(96,239,255,.12); }
+    .nav { max-width: 1200px; margin: 0 auto; padding: 10px 14px; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
     .logo { display: grid; grid-auto-flow: column; align-items: center; gap: 10px; font-weight: 750; letter-spacing: .3px; font-size: 16px; }
-    .logo-badge { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: conic-gradient(from 200deg, var(--accent), var(--accent-2)); box-shadow: 0 6px 16px rgba(21,199,182,.35); }
-    .chip { padding: 4px 8px; border: 1px solid rgba(96,239,255,.18); border-radius: 999px; color: var(--muted); font-size: 12px; }
+    .logo-badge { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: conic-gradient(from 200deg, var(--accent), var(--accent-2)); box-shadow: 0 8px 20px rgba(21,199,182,.35); }
+    .chip { padding: 6px 10px; border: 1px solid rgba(96,239,255,.18); border-radius: 999px; color: var(--muted); font-size: 12px; }
 
-    main { max-width: 1200px; margin: 14px auto 28px; padding: 0 14px; }
-    .grid { display: grid; grid-template-columns: 320px 1fr 320px; gap: 12px; }
+    main { max-width: 1200px; margin: 16px auto 40px; padding: 0 14px; }
+    .grid { display: grid; grid-template-columns: 330px 1fr 340px; gap: 14px; }
+    @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
 
     .card { background: linear-gradient(180deg, rgba(16,25,46,.8), rgba(12,20,38,.8)); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
     .card .hd { padding: 10px 12px; display:flex; align-items:center; justify-content:space-between; gap:10px; background: linear-gradient(180deg, rgba(22,32,58,.6), rgba(19,28,50,.2)); border-bottom: 1px solid rgba(96,239,255,.1); }
@@ -53,64 +48,58 @@
     .card .bd { padding: 12px; }
 
     .stat { display:grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-    .kpi { padding: 10px; border: 1px solid rgba(96,239,255,.12); border-radius: 12px; background: rgba(17,28,52,.45); }
-    .kpi .lbl { color: var(--muted); font-size: 12px; }
+    .kpi { padding: 8px; border: 1px solid rgba(96,239,255,.12); border-radius: 12px; background: rgba(17,28,52,.45); }
+    .kpi .lbl { color: var(--muted); font-size: 11px; }
     .kpi .val { margin-top: 2px; font-size: 16px; font-weight: 800; letter-spacing: .2px; }
 
     .row { display: grid; gap: 8px; }
     label { font-size: 12px; color: var(--muted); }
     input[type="text"], input[type="password"], input[type="number"], select, textarea {
       width: 100%; padding: 10px 10px; border-radius: 10px; outline: none; color: var(--text);
-      background: rgba(13,21,40,.75); border: 1px solid rgba(96,239,255,.12); transition: border-color .15s ease, box-shadow .15s ease; font-size: 14px;
+      background: rgba(13,21,40,.75); border: 1px solid rgba(96,239,255,.12);
+      transition: border-color .15s ease, box-shadow .15s ease;
     }
-    input:focus, select:focus, textarea:focus { border-color: rgba(96,239,255,.35); box-shadow: 0 0 0 3px rgba(96,239,255,.12); }
+    input:focus, select:focus, textarea:focus { border-color: rgba(96,239,255,.35); box-shadow: 0 0 0 4px rgba(96,239,255,.12); }
 
-    .btn { appearance: none; border:0; cursor:pointer; color: #04151f; font-weight: 800; letter-spacing: .2px; padding: 10px 12px; border-radius: 10px; transition: transform .05s ease, filter .2s ease, opacity .2s ease; background: linear-gradient(90deg, var(--accent), var(--accent-2)); box-shadow: 0 8px 22px rgba(21,199,182,.3), inset 0 0 0 1px rgba(255,255,255,.18); font-size: 14px; }
+    .btn { appearance: none; border:0; cursor:pointer; color: #04151f; font-weight: 800; letter-spacing: .2px; padding: 10px 12px; border-radius: 10px; transition: transform .05s ease, filter .2s ease, opacity .2s ease; background: linear-gradient(90deg, var(--accent), var(--accent-2)); box-shadow: 0 10px 26px rgba(21,199,182,.35), inset 0 0 0 1px rgba(255,255,255,.18); font-size: 14px; }
     .btn:active { transform: translateY(1px); }
     .btn.secondary { color: var(--text); background: transparent; border: 1px solid rgba(96,239,255,.22); box-shadow: none; }
-    .btn.warn { color: #1a1007; background: linear-gradient(90deg, #f59e0b, #fde047); box-shadow: 0 8px 20px rgba(245,158,11,.28); }
-    .btn.danger { color: #1a0b0b; background: linear-gradient(90deg, #ef4444, #fb7185); box-shadow: 0 8px 20px rgba(239,68,68,.28); }
+    .btn.warn { color: #1a1007; background: linear-gradient(90deg, #f59e0b, #fde047); box-shadow: 0 10px 26px rgba(245,158,11,.3); }
+    .btn.danger { color: #1a0b0b; background: linear-gradient(90deg, #ef4444, #fb7185); box-shadow: 0 10px 26px rgba(239,68,68,.32); }
     .btn:disabled { filter: grayscale(1) brightness(.85); opacity: .6; cursor: not-allowed; box-shadow: none; }
 
-    .wallet-list { display: grid; gap: 8px; max-height: none; }
-    .wallet { padding: 8px 10px; border: 1px solid rgba(96,239,255,.12); border-radius: 10px; display:grid; grid-template-columns: 1fr auto; gap: 6px; align-items:center; background: rgba(14,24,44,.5); }
+    .wallet-list { display: grid; gap: 6px; }
+    .wallet { padding: 8px 10px; border: 1px solid rgba(96,239,255,.12); border-radius: 10px; display:grid; grid-template-columns: 1fr auto; gap: 8px; align-items:center; background: rgba(14,24,44,.5); }
     .wallet .name { font-weight: 750; font-size: 14px; }
     .wallet .balance { font-variant-numeric: tabular-nums; background: rgba(21,199,182,.08); border:1px solid rgba(21,199,182,.24); padding: 4px 8px; border-radius: 999px; font-size: 12px; }
 
-    .history-tools { display:flex; gap: 6px; align-items:center; margin-bottom: 8px; flex-wrap: wrap; }
-    .table { width: 100%; border-collapse: separate; border-spacing: 0; overflow-x: auto; display:block; border: 1px solid rgba(96,239,255,.1); border-radius: 10px; background: rgba(13,22,40,.4); }
-    .table table { width: 100%; }
-    .table thead { position: sticky; top: 0; backdrop-filter: blur(6px); background: rgba(15,23,42,.75); }
+    .history-tools { display:flex; gap: 8px; align-items:center; margin-bottom: 8px; flex-wrap: wrap; }
+    .table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: auto; display:block; border: 1px solid rgba(96,249,255,.08); border-radius: 10px; background: rgba(13,22,40,.4); }
+    .table thead { position: sticky; top: 0; backdrop-filter: blur(8px); background: rgba(15,23,42,.75); }
     .table th, .table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid rgba(96,239,255,.06); white-space: nowrap; }
     .table td.memo { white-space: normal; }
-    .table tr:last-child td { border-bottom: none; }
     .pill { padding: 4px 8px; border-radius:999px; font-weight: 700; font-size: 12px; background: rgba(21,199,182,.12); border:1px solid rgba(21,199,182,.32); }
     .amount { font-variant-numeric: tabular-nums; font-weight: 800; }
 
-    .toolbar { display:flex; gap: 6px; flex-wrap: wrap; }
+    .toolbar { display:flex; gap: 8px; flex-wrap: wrap; }
 
-    .footer { margin-top: 10px; color: var(--muted); font-size: 12px; display:flex; gap:10px; align-items:center; justify-content:space-between; }
-
-    .toast { position: fixed; right: 14px; bottom: 14px; display:grid; gap:6px; z-index: 60; }
-    .toast .msg { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(96,239,255,.2); background: rgba(17,27,48,.9); box-shadow: var(--shadow); }
+    .toast { position: fixed; right: 12px; bottom: 12px; display:grid; gap:6px; z-index: 60; }
+    .toast .msg { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(96,239,255,.2); background: rgba(17,27,48,.9); box-shadow: var(--shadow); font-size: 13px; }
 
     .tabbar { display:flex; gap:6px; flex-wrap:wrap; }
     .tabbar .tab { padding:6px 10px; border:1px solid rgba(96,239,255,.2); border-radius:999px; background: rgba(15,25,46,.6); cursor:pointer; font-size: 13px; }
     .tabbar .tab.active { border-color: rgba(96,239,255,.45); background: rgba(21,199,182,.1); }
 
     .subtabs { display:flex; gap:6px; margin-bottom:6px; flex-wrap: wrap; }
-    .subtabs .sub { padding:4px 8px; border:1px solid rgba(96,239,255,.2); border-radius:999px; cursor:pointer; background: rgba(15,25,46,.6); font-size:12px; }
+    .subtabs .sub { padding:5px 8px; border:1px solid rgba(96,239,255,.2); border-radius:999px; cursor:pointer; background: rgba(15,25,46,.6); font-size:12px; }
     .subtabs .sub.active { border-color: rgba(96,239,255,.45); background: rgba(21,199,182,.1); }
 
     .panel { border:1px solid rgba(96,239,255,.12); border-radius:10px; padding:10px; background: rgba(12,22,40,.5); }
 
-    .banner { border:1px dashed rgba(245,158,11,.5); background: rgba(245,158,11,.08); border-radius:10px; padding:8px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .banner { border:1px dashed rgba(245,158,11,.5); background: rgba(245,158,11,.08); border-radius:10px; padding:8px; display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
     .banner .txt { font-size: 13px; }
     .banner .actions { display:flex; gap:6px; }
 
-    /* レスポンシブ */
-    @media (max-width: 1100px) { .grid { grid-template-columns: 1fr 1fr; } }
-    @media (max-width: 820px)  { .grid { grid-template-columns: 1fr; } .logo { font-size: 15px; } }
   </style>
 </head>
 <body>
@@ -119,9 +108,9 @@
       <div class="logo">
         <div class="logo-badge"></div>
         trpg鯖 トークン
-        <span class="chip">ログイン / ローカル保存</span>
+        <span class="chip">ローカル保存 & ルーム同期</span>
       </div>
-      <div style="margin-left:auto" class="toolbar">
+      <div class="toolbar">
         <div id="userBadge" class="chip">未ログイン</div>
         <div id="actingBadge" class="chip" title="ジャックポット操作の代理人" style="display:none;">acting: —</div>
         <div id="streakBadge" class="chip" title="朝活ストリーク">🔥0</div>
@@ -129,23 +118,36 @@
         <button class="btn" id="morningBtn" title="朝活ボーナス：7:30までに押すと1日1回">朝活</button>
         <button class="btn secondary" id="exportBtn">エクスポート</button>
         <label class="btn secondary" for="importFile">インポート<input type="file" id="importFile" accept="application/json" style="display:none" /></label>
-        <!-- 要望により 全員配布 / リセット を削除 -->
       </div>
     </div>
   </header>
 
   <main>
     <div class="grid">
-      <!-- 左：アカウント -->
       <section class="card" aria-label="アカウント">
-        <div class="hd"><h3>アカウント</h3></div>
+        <div class="hd"><h3>アカウント & 同期</h3></div>
         <div class="bd">
           <div class="stat" id="summary">
             <div class="kpi"><div class="lbl">総ユーザー（JPOT除外）</div><div class="val" id="kpiMembers">0</div></div>
             <div class="kpi"><div class="lbl">総供給量</div><div class="val" id="kpiSupply">0 coin</div></div>
           </div>
 
-          <div class="row" style="margin-bottom:10px; grid-template-columns: 1fr;">
+          <div class="row panel" style="margin-bottom:8px;">
+            <label>同期設定（Cloudflare Workers の WSS）</label>
+            <input id="syncUrl" type="text" placeholder= "wss://trpgsabascoreboad.kirikokawaiina.workers.dev/ws" />
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+              <input id="syncRoom" type="text" placeholder="ルーム名（例：trpg-guild）" />
+              <input id="syncKey" type="text" placeholder="ルーム鍵（友達だけで共有）" />
+            </div>
+            <div class="toolbar">
+              <button class="btn" id="btnConnect">接続</button>
+              <button class="btn secondary" id="btnDisconnect">切断</button>
+              <button class="btn warn" id="btnBroadcast">いまの状態を送信</button>
+              <span id="syncStatus" class="chip">未接続</span>
+            </div>
+          </div>
+
+          <div class="row" style="margin-bottom:8px;">
             <div class="row panel">
               <label for="loginName">ログイン</label>
               <input id="loginName" type="text" placeholder="ユーザー名（ジャックポットはパス不要）" />
@@ -170,7 +172,6 @@
         </div>
       </section>
 
-      <!-- 中央：操作 -->
       <section class="card" aria-label="操作">
         <div class="hd">
           <h3>操作</h3>
@@ -183,8 +184,7 @@
         </div>
         <div class="bd">
 
-          <!-- 承認バナー（JPOT送金 / 権利実行リクエスト） -->
-          <div id="approvalBanner" class="banner" style="display:none; margin-bottom:8px;">
+          <div id="approvalBanner" class="banner" style="display:none;">
             <div class="txt" id="approvalText">—</div>
             <div class="actions" id="approvalActions">
               <button class="btn secondary" id="btnReject">拒否</button>
@@ -192,7 +192,7 @@
             </div>
           </div>
 
-          <div id="rightReqBanner" class="banner" style="display:none; margin-bottom:8px;">
+          <div id="rightReqBanner" class="banner" style="display:none;">
             <div class="txt" id="rightReqText">—</div>
             <div class="actions" id="rightReqActions">
               <button class="btn secondary" id="btnRightCancel">キャンセル申請</button>
@@ -200,7 +200,6 @@
             </div>
           </div>
 
-          <!-- 送金 -->
           <div id="tab-transfer">
             <div class="row" style="grid-template-columns: 1fr 1fr; display:grid; gap:10px;">
               <div class="row">
@@ -228,7 +227,6 @@
             </div>
           </div>
 
-          <!-- マーケット（サブタブ：出品する / 出品一覧） -->
           <div id="tab-market" style="display:none;">
             <div class="subtabs">
               <div class="sub active" data-sub="sell">出品する</div>
@@ -239,7 +237,7 @@
                 <label>権利の出品（販売者）</label>
                 <input id="listTitle" type="text" placeholder="例）ゲームを一緒に遊ぶ" />
                 <textarea id="listDesc" rows="2" placeholder="説明（任意）"></textarea>
-                <div style="display:grid; grid-template-columns: 1fr 140px 140px; gap:8px;">
+                <div style="display:grid; grid-template-columns: 1fr 1fr 140px; gap:8px;">
                   <div class="row">
                     <label for="listPrice">価格（coin）</label>
                     <input id="listPrice" type="number" min="1" step="1" placeholder="例）1000" />
@@ -259,7 +257,7 @@
               <div class="row">
                 <label>出品一覧</label>
                 <div class="table" role="region" aria-label="出品一覧">
-                  <table>
+                  <table style="min-width:860px; width:100%;">
                     <thead>
                       <tr>
                         <th>タイトル</th>
@@ -277,12 +275,11 @@
             </div>
           </div>
 
-          <!-- 自分の権利 -->
           <div id="tab-myrights" style="display:none;">
             <div class="row">
               <label>自分が保有する権利</label>
               <div class="table" role="region" aria-label="自分の権利">
-                <table>
+                <table style="min-width:860px; width:100%;">
                   <thead>
                     <tr>
                       <th>日付</th>
@@ -298,7 +295,6 @@
             </div>
           </div>
 
-          <!-- ギャンブル（ルーレット + JPOT残高）-->
           <div id="tab-gamble" style="display:none;">
             <div class="row panel">
               <label>TRPGジャックポット（ユーザー残高）</label>
@@ -312,28 +308,24 @@
               <div class="toolbar">
                 <button class="btn" id="rouletteBtn">回す</button>
               </div>
-              <div id="rouletteResult" class="chip" style="margin-top:6px;">結果: —</div>
+              <div id="rouletteResult" class="chip" style="margin-top:8px;">結果: —</div>
             </div>
-          </div>
-
-          <div class="footer">
-            <div id="lastActivity">最終更新：—</div>
           </div>
         </div>
       </section>
 
-      <!-- 右：履歴（小さめ） -->
       <section class="card" aria-label="履歴">
         <div class="hd">
           <h3>履歴</h3>
           <div class="history-tools">
             <input id="searchInput" type="text" placeholder="検索：名前 / メモ / 権利" style="width:200px" />
             <select id="memberFilter"><option value="">すべて</option></select>
+            <div id="lastActivity" class="chip">最終更新：—</div>
           </div>
         </div>
         <div class="bd">
           <div class="table" role="region" aria-label="履歴テーブル">
-            <table>
+            <table style="min-width:760px; width:100%;">
               <thead>
                 <tr>
                   <th>日付</th>
@@ -356,20 +348,57 @@
 
   <script>
   (function(){
-    const LS_KEY = 'trpg_token_state_v11_compact_scroll';
+    const LS_KEY = 'trpg_token_state_v12_cfws';
+    const LS_SYNC = 'trpg_token_sync_settings';
     const INITIAL_BAL = 10000;
     const JACKPOT_NAME = 'ジャックポット';
 
-    /**
-     * state v11
-     * users: {id,name,passHash,balance,lastMorningDate?,streakCount?}[]
-     * txs: {..., actedBy?:string}[]
-     * listings: {id,title,price,desc,sellerId,active,ts, qty:number, sold:number}
-     * rights: {id,listingId,title,buyerId,sellerId,ts,status:'owned'|'request'|'seller_executed'|'seller_cancel_requested'|'finalized',executed:boolean, price:number}
-     * approval: JPOT送金 {active,toId,amount,memo,votes{}}
-     * lastRealUserId: string|null
-     */
-    let state = { users: [], txs: [], listings: [], rights: [], currentUserId: null, jackpotUserId: '', lastRealUserId: null, approval:{active:false, votes:{}}, version: 11 };
+    let state = { users: [], txs: [], listings: [], rights: [], currentUserId: null, jackpotUserId: '', lastRealUserId: null, approval:{active:false, votes:{}}, version: 12, vTick: 0 };
+
+    const sync = {
+      ws: null,
+      clientId: (localStorage.getItem('trpg_token_client_id') || Math.random().toString(36).slice(2)),
+      url: '', room: '', key: '',
+      connected: false,
+      saveSettings(){ const s = { url: sync.url, room: sync.room, key: sync.key }; localStorage.setItem(LS_SYNC, JSON.stringify(s)); },
+      loadSettings(){ try { const raw = localStorage.getItem(LS_SYNC); if(raw){ const s=JSON.parse(raw); sync.url=s.url||''; sync.room=s.room||''; sync.key=s.key||''; } } catch(e){}; els.syncUrl.value = sync.url; els.syncRoom.value = sync.room; els.syncKey.value = sync.key; },
+      connect(){
+        if(sync.connected){ toast('すでに接続中'); return; }
+        sync.url = (els.syncUrl.value||'').trim();
+        sync.room = (els.syncRoom.value||'').trim();
+        sync.key = (els.syncKey.value||'').trim();
+        if(!sync.url || !sync.room || !sync.key){ toast('URL / ルーム / 鍵 を入力してください'); return; }
+        try { sync.ws = new WebSocket(sync.url.replace(/^http/, 'ws')); } catch(e){ toast('URLが正しくありません'); return; }
+        sync.saveSettings();
+        els.syncStatus.textContent = '接続中…';
+        sync.ws.onopen = () => {
+          sync.connected = true;
+          els.syncStatus.textContent = '接続済み';
+          sync.ws.send(JSON.stringify({ type:'join', room: sync.room, key: sync.key, cid: sync.clientId }));
+          setTimeout(()=>{ sync.send({ type:'app', action:'hello', cid: sync.clientId }); }, 300);
+        };
+        sync.ws.onmessage = (ev) => {
+          let msg={}; try{ msg=JSON.parse(ev.data); }catch{};
+          if(msg.type==='app'){
+            if(msg.cid && msg.cid===sync.clientId) return;
+            if(msg.action==='hello'){ setTimeout(()=>{ sync.broadcastState(); }, 300); }
+            if(msg.action==='state' && msg.state){
+              if(typeof msg.state.vTick === 'number' && msg.state.vTick > (state.vTick||0)){
+                state = msg.state;
+                state.currentUserId = localStorage.getItem('last_current_uid') || null;
+                save(true); renderAll(); toast('同期：最新状態を受信しました');
+              }
+            }
+          }
+        };
+        sync.ws.onclose = () => { sync.connected=false; els.syncStatus.textContent='未接続'; };
+        sync.ws.onerror = () => { sync.connected=false; els.syncStatus.textContent='未接続（エラー）'; };
+      },
+      disconnect(){ if(sync.ws){ try{ sync.ws.close(); }catch{} } sync.connected=false; els.syncStatus.textContent='未接続'; toast('切断しました'); },
+      send(obj){ if(!sync.connected || !sync.ws) return; try { sync.ws.send(JSON.stringify(obj)); } catch(e){} },
+      broadcastState(){ const tmp = Object.assign({}, state, { currentUserId: null }); sync.send({ type:'app', action:'state', cid: sync.clientId, state: tmp }); }
+    };
+    localStorage.setItem('trpg_token_client_id', sync.clientId);
 
     const els = {
       kpiMembers: document.getElementById('kpiMembers'),
@@ -392,7 +421,6 @@
       streakBadge: document.getElementById('streakBadge'),
       jackpotBadge: document.getElementById('jackpotBadge'),
       morningBtn: document.getElementById('morningBtn'),
-      // auth
       loginName: document.getElementById('loginName'),
       loginPass: document.getElementById('loginPass'),
       loginBtn: document.getElementById('loginBtn'),
@@ -400,13 +428,11 @@
       regName: document.getElementById('regName'),
       regPass: document.getElementById('regPass'),
       registerBtn: document.getElementById('registerBtn'),
-      // tabs
       tabs: Array.from(document.querySelectorAll('.tabbar .tab')),
       tabTransfer: document.getElementById('tab-transfer'),
       tabMarket: document.getElementById('tab-market'),
       tabMyRights: document.getElementById('tab-myrights'),
       tabGamble: document.getElementById('tab-gamble'),
-      // market
       listTitle: document.getElementById('listTitle'),
       listDesc: document.getElementById('listDesc'),
       listPrice: document.getElementById('listPrice'),
@@ -414,15 +440,12 @@
       createListingBtn: document.getElementById('createListingBtn'),
       listingBody: document.getElementById('listingBody'),
       rightsBody: document.getElementById('rightsBody'),
-      // market subtabs
       subtabs: Array.from(document.querySelectorAll('#tab-market .subtabs .sub')),
       marketSell: document.getElementById('market-sell'),
       marketList: document.getElementById('market-list'),
-      // gamble
       jackpotChip: document.getElementById('jackpotChip'),
       rouletteBtn: document.getElementById('rouletteBtn'),
       rouletteResult: document.getElementById('rouletteResult'),
-      // approval banners
       approvalBanner: document.getElementById('approvalBanner'),
       approvalText: document.getElementById('approvalText'),
       approvalActions: document.getElementById('approvalActions'),
@@ -433,9 +456,15 @@
       rightReqActions: document.getElementById('rightReqActions'),
       btnRightExec: document.getElementById('btnRightExec'),
       btnRightCancel: document.getElementById('btnRightCancel'),
+      syncUrl: document.getElementById('syncUrl'),
+      syncRoom: document.getElementById('syncRoom'),
+      syncKey: document.getElementById('syncKey'),
+      btnConnect: document.getElementById('btnConnect'),
+      btnDisconnect: document.getElementById('btnDisconnect'),
+      btnBroadcast: document.getElementById('btnBroadcast'),
+      syncStatus: document.getElementById('syncStatus'),
     };
 
-    // ---------- Utils ----------
     const fmt = new Intl.NumberFormat('ja-JP');
     const coins = n => `${fmt.format(n)} coin`;
     const ts2str = ts => { const d = new Date(ts); const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; };
@@ -443,16 +472,13 @@
     const escapeHtml = (s)=> String(s).replace(/[&<>\"']/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
     const pill = (txt)=> `<span class="pill">${escapeHtml(txt)}</span>`;
 
-    function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
-    function load(){ try { const raw = localStorage.getItem(LS_KEY); if(raw){ state = JSON.parse(raw); } } catch(e){ console.error(e); } }
+    function save(skipBroadcast){ localStorage.setItem(LS_KEY, JSON.stringify(state)); if(!skipBroadcast){ syncDebounced(); } }
+    function load(){ try { const raw = localStorage.getItem(LS_KEY); if(raw){ state = JSON.parse(raw); } } catch(e){}; if(typeof state.vTick!=='number') state.vTick=0; }
 
     function toast(msg){
-      const div = document.createElement('div');
-      div.className = 'msg';
-      div.textContent = msg;
-      els.toast.appendChild(div);
-      setTimeout(()=>{ div.style.opacity = '0'; div.style.transform = 'translateY(4px)'; }, 2200);
-      setTimeout(()=>{ div.remove(); }, 2800);
+      const div = document.createElement('div'); div.className = 'msg'; div.textContent = msg; els.toast.appendChild(div);
+      setTimeout(()=>{ div.style.opacity = '0'; div.style.transform = 'translateY(4px)'; }, 2400);
+      setTimeout(()=>{ div.remove(); }, 3000);
     }
 
     async function sha256(text){
@@ -467,66 +493,56 @@
     function isJackpot(u){ return u && u.id===state.jackpotUserId; }
     function nameOf(uid){ const u=findUserById(uid); return u?u.name:''; }
 
-    // Ensure Jackpot user exists
     function ensureJackpotUser(){
       let j = findUserByName(JACKPOT_NAME);
-      if(!j){
-        j = { id: id(), name: JACKPOT_NAME, passHash: '', balance: 0, streakCount: 0, lastMorningDate: '' };
-        state.users.unshift(j);
-      }
+      if(!j){ j = { id: id(), name: JACKPOT_NAME, passHash: '', balance: 0, streakCount: 0, lastMorningDate: '' }; state.users.unshift(j); }
       state.jackpotUserId = j.id;
     }
 
-    // ---------- Auth ----------
     async function register(name, pass){
       name = (name||'').trim();
       if(!name || !pass){ toast('ユーザー名とパスワードを入力'); return; }
       if(name===JACKPOT_NAME){ toast('この名前は予約されています'); return; }
       if(state.users.some(u=>u.name===name)){ toast('そのユーザー名は使用済み'); return; }
       const passHash = await sha256(pass);
-      const u = { id: id(), name, passHash, balance: INITIAL_BAL, streakCount: 0, lastMorningDate: '' };
+      const u = { id: id(), name, passHash, balance: 10000, streakCount: 0, lastMorningDate: '' };
       state.users.push(u);
-      state.currentUserId = u.id;
-      state.lastRealUserId = u.id;
-      addTx({ type:'mint', to:u.id, amount:INITIAL_BAL, memo:'初期発行' });
-      save(); renderAll(); toast(`登録完了：${name}`);
+      state.currentUserId = u.id; state.lastRealUserId = u.id;
+      addTx({ type:'mint', to:u.id, amount:10000, memo:'初期発行' });
+      bump(); save(); renderAll(); toast(`登録完了：${name}`);
     }
 
     async function login(name, pass){
       name = (name||'').trim();
       let u = findUserByName(name);
       if(!u){ toast('ユーザーが見つかりません'); return; }
-      if(isJackpot(u)){
-        state.currentUserId = u.id;
-      } else {
+      if(isJackpot(u)){ state.currentUserId = u.id; }
+      else {
         const passHash = await sha256(pass||'');
         if(u.passHash !== passHash){ toast('パスワードが違います'); return; }
-        state.currentUserId = u.id;
-        state.lastRealUserId = u.id;
+        state.currentUserId = u.id; state.lastRealUserId = u.id;
       }
-      save(); renderAll(); toast(`ログイン：${u.name}`);
+      localStorage.setItem('last_current_uid', state.currentUserId || '');
+      save(true); renderAll(); toast(`ログイン：${u.name}`);
     }
 
-    function logout(){ state.currentUserId = null; save(); renderAll(); toast('ログアウトしました'); }
+    function logout(){ state.currentUserId = null; localStorage.setItem('last_current_uid',''); save(true); renderAll(); toast('ログアウトしました'); }
     function currentUser(){ return findUserById(state.currentUserId); }
 
-    // tx helper: 自動で actedBy を付与（ジャックポットで操作した場合）
     function addTx(obj){
-      const now = Date.now();
-      const base = { id:id(), ts: now };
-      const me = currentUser();
-      const actedBy = (me && isJackpot(me) && state.lastRealUserId) ? state.lastRealUserId : null;
+      const now = Date.now(); const base = { id:id(), ts: now };
+      const me = currentUser(); const actedBy = (me && isJackpot(me) && state.lastRealUserId) ? state.lastRealUserId : null;
       if(actedBy) obj.actedBy = actedBy;
       state.txs.unshift(Object.assign(base, obj));
     }
+    function bump(){ state.vTick = (state.vTick||0) + 1; }
 
-    // ---------- Approval Flow (JPOT -> user) ----------
     function startApproval(toId, amount, memo){
       const j = jackpotUser();
       if(!j) { toast('JPOTが見つかりません'); return; }
       if(j.balance < amount){ toast('ジャックポット残高が不足しています'); return; }
       state.approval = { active:true, toId, amount, memo:(memo||'').trim(), votes:{}, ts: Date.now() };
-      save(); renderAll();
+      bump(); save(); renderAll();
       toast(`承認依頼：${nameOf(j.id)} → ${nameOf(toId)} に ${fmt.format(amount)} coin`);
     }
 
@@ -535,7 +551,7 @@
       if(isJackpot(me)){ toast('ジャックポットは投票できません'); return; }
       if(!state.approval.active){ toast('承認依頼はありません'); return; }
       state.approval.votes[me.id] = agree ? 'approve' : 'reject';
-      save(); renderApprovalBanner(true); // 直ちにUI灰化
+      bump(); save(); renderApprovalBanner(true);
       checkApproval();
     }
 
@@ -544,7 +560,7 @@
       if(!me || !isJackpot(me)) return;
       if(!state.approval.active) return;
       state.approval = {active:false, votes:{}};
-      save(); renderAll(); toast('承認依頼をキャンセルしました');
+      bump(); save(); renderAll(); toast('承認依頼をキャンセルしました');
     }
 
     function checkApproval(){
@@ -552,24 +568,22 @@
       const votes = state.approval.votes || {};
       if(Object.values(votes).includes('reject')){
         state.approval = {active:false, votes:{}};
-        save(); renderAll(); toast('承認：拒否があったためキャンセル');
+        bump(); save(); renderAll(); toast('承認：拒否があったためキャンセル');
         return;
       }
       const allApproved = totalVoters.every(uid => votes[uid] === 'approve');
-      if(!allApproved){ save(); renderAll(); return; }
-      // execute
+      if(!allApproved){ bump(); save(); renderAll(); return; }
       const j = jackpotUser();
       const to = findUserById(state.approval.toId);
       const amt = state.approval.amount||0;
-      if(!j || !to){ toast('ユーザー不明'); state.approval={active:false, votes:{}}; save(); renderAll(); return; }
-      if(j.balance < amt){ toast('実行時に残高不足'); state.approval={active:false, votes:{}}; save(); renderAll(); return; }
+      if(!j || !to){ state.approval={active:false, votes:{}}; bump(); save(); renderAll(); return; }
+      if(j.balance < amt){ state.approval={active:false, votes:{}}; bump(); save(); renderAll(); return; }
       j.balance -= amt; to.balance += amt;
       addTx({ type:'transfer', from: j.id, to: to.id, amount: amt, memo: `（全員承認送金）${state.approval.memo||''}` });
       state.approval = {active:false, votes:{}};
-      save(); renderAll(); toast(`全員承認 → 送金実行：${nameOf(j.id)} → ${nameOf(to.id)} ${fmt.format(amt)} coin`);
+      bump(); save(); renderAll(); toast(`全員承認 → 送金実行：${nameOf(j.id)} → ${nameOf(to.id)} ${fmt.format(amt)} coin`);
     }
 
-    // ---------- Coin transfer ----------
     function transfer(toId, amount, memo){
       const from = currentUser();
       if(!from){ toast('ログインが必要です'); return; }
@@ -582,25 +596,21 @@
 
       if(isJackpot(from)){
         if(isJackpot(to)){ toast('ジャックポットへは送金できません'); return; }
-        startApproval(toId, amount, memo);
-        return;
+        startApproval(toId, amount, memo); return;
       }
-      if(isJackpot(to)){
-        toast('ジャックポットへは直接送金できません（手数料・ギャンブルのみ）');
-        return;
-      }
+      if(isJackpot(to)){ toast('ジャックポットへは直接送金できません（手数料・ギャンブルのみ）'); return; }
 
       if(from.balance < amount){ toast('残高が不足しています'); return; }
       from.balance -= amount; to.balance += amount;
       addTx({ type:'transfer', from: from.id, to: to.id, amount, memo: (memo||'').trim() });
-      save(); renderAll(); toast(`${from.name} → ${to.name} に ${fmt.format(amount)} coin 送信しました`);
+      bump(); save(); renderAll(); toast(`${from.name} → ${to.name} に ${fmt.format(amount)} coin 送信しました`);
     }
 
     function exportJSON(){
       const blob = new Blob([JSON.stringify(state, null, 2)], {type: 'application/json'});
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `trpg_token_unicorn_v11_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+      a.download = `trpg_token_sync_v12_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
       a.click(); URL.revokeObjectURL(a.href);
     }
 
@@ -609,17 +619,18 @@
       reader.onload = (e)=>{
         try { const data = JSON.parse(e.target.result);
           if(!data || !Array.isArray(data.users) || !Array.isArray(data.txs)) throw new Error('不正な形式');
-          state = Object.assign({version:11, approval:{active:false, votes:{}}, lastRealUserId: null}, data);
+          const keepUid = state.currentUserId;
+          state = Object.assign({version:12, approval:{active:false, votes:{}}, lastRealUserId: null, vTick:(state.vTick||0)+1}, data);
+          state.currentUserId = keepUid || null;
           ensureJackpotUser();
           state.listings.forEach(l=>{ if(typeof l.qty!=='number') l.qty=1; if(typeof l.sold!=='number') l.sold=0; });
-          state.rights.forEach(r=>{ if(!r.status){ r.status = r.executed? 'finalized':'owned'; } if(typeof r.price!=='number'){ const ls=state.listings.find(x=>x.id===r.listingId); r.price = ls? ls.price:0; } });
+          state.rights.forEach(r=>{ if(!r.status){ r.status = r.executed? 'finalized':'owned'; } });
           save(); renderAll(); toast('インポートしました');
-        } catch(err){ console.error(err); toast('読み込みに失敗しました'); }
+        } catch(err){ toast('読み込みに失敗しました'); }
       };
       reader.readAsText(file);
     }
 
-    // ---------- Market (rights) ----------
     function createListing(title, price, desc){
       const seller = currentUser();
       if(!seller){ toast('ログインが必要です'); return; }
@@ -631,7 +642,7 @@
       if(!(qty>0)){ toast('在庫は1以上の整数'); return; }
       const listing = { id:id(), title, price, desc, sellerId: seller.id, active:true, ts: Date.now(), qty, sold: 0 };
       state.listings.unshift(listing);
-      save(); renderAll(); toast('出品しました');
+      bump(); save(); renderAll(); toast('出品しました');
       els.listTitle.value=''; els.listDesc.value=''; els.listPrice.value=''; els.listQty.value='';
       switchMarketSub('list');
     }
@@ -643,7 +654,7 @@
       if(l.sellerId === buyer.id){ toast('自分の出品は購入できません'); return; }
       if(isJackpot(buyer)){ toast('ジャックポットでは購入できません'); return; }
       const remaining = (l.qty||1) - (l.sold||0);
-      if(remaining<=0){ toast('在庫切れ'); l.active=false; save(); renderAll(); return; }
+      if(remaining<=0){ toast('在庫切れ'); l.active=false; bump(); save(); renderAll(); return; }
       if(buyer.balance < l.price){ toast('残高不足'); return; }
       const seller = findUserById(l.sellerId); if(!seller){ toast('販売者が不明'); return; }
 
@@ -653,7 +664,7 @@
 
       buyer.balance -= l.price; seller.balance += sellerReceive; j.balance += fee;
 
-      const right = { id:id(), listingId: l.id, title: l.title, buyerId: buyer.id, sellerId: seller.id, ts: Date.now(), status:'owned', executed:false, price: l.price };
+      const right = { id:id(), listingId: l.id, title: l.title, buyerId: buyer.id, sellerId: seller.id, ts: Date.now(), status:'owned', executed:false };
       state.rights.unshift(right);
 
       l.sold = (l.sold||0) + 1;
@@ -662,7 +673,7 @@
       addTx({ type:'purchase', from: buyer.id, to: seller.id, amount: l.price, listingId:l.id, title:l.title, memo:`権利購入（手数料10%）` });
       addTx({ type:'fee', from: seller.id, to: j.id, amount: fee, listingId:l.id, title:l.title, memo:'販売手数料' });
 
-      save(); renderAll(); toast(`購入：${l.title}（残り在庫 ${l.qty - l.sold}）`);
+      bump(); save(); renderAll(); toast(`購入：${l.title}（残り在庫 ${l.qty - l.sold}）`);
     }
 
     function deleteListing(listingId){
@@ -674,7 +685,7 @@
       if((l.sold||0) > 0){ toast('購入履歴があるため削除できません'); return; }
       if(!confirm('この出品を完全に削除しますか？')) return;
       state.listings.splice(idx,1);
-      save(); renderAll(); toast('出品を削除しました');
+      bump(); save(); renderAll(); toast('出品を削除しました');
     }
 
     function toggleListingActive(listingId){
@@ -682,10 +693,9 @@
       const l = state.listings.find(x=>x.id===listingId);
       if(!l){ toast('出品が見つかりません'); return; }
       if(l.sellerId !== me.id){ toast('自分の出品のみ操作可能'); return; }
-      l.active = !l.active; save(); renderAll(); toast(l.active?'出品を公開しました':'出品を停止しました');
+      l.active = !l.active; bump(); save(); renderAll(); toast(l.active?'出品を公開しました':'出品を停止しました');
     }
 
-    // ---------- Rights flow + Return ----------
     function buyerRequest(rightId){
       const me=currentUser(); if(!me){ toast('ログインが必要'); return; }
       const r = state.rights.find(x=>x.id===rightId); if(!r) return;
@@ -693,27 +703,26 @@
       if(r.status!=='owned'){ toast('この権利は申請済みです'); return; }
       r.status='request';
       addTx({type:'execute-request', from:r.buyerId, to:r.sellerId, listingId:r.listingId, title:r.title, memo:'実行申請'});
-      save(); renderAll(); toast('実行を申請しました（販売者に通知）');
+      bump(); save(); renderAll(); toast('実行を申請しました（販売者に通知）');
     }
 
     function buyerReturn(rightId){
       const me=currentUser(); if(!me){ toast('ログインが必要'); return; }
       const r = state.rights.find(x=>x.id===rightId); if(!r) return;
-      if(r.buyerId!==me.id){ toast('自分の権利ではありません'); return; }
-      if(r.status!=='owned'){ toast('この権利は返品できません'); return; }
-      const seller = findUserById(r.sellerId); if(!seller){ toast('販売者不明'); return; }
-      const listing = state.listings.find(l=>l.id===r.listingId);
-      const price = r.price || (listing? listing.price : 0);
-      const fee = Math.floor(price*0.10);
-      const refund = price - fee; // 手数料は戻さない
-      if(seller.balance < refund){ toast('販売者の残高が不足しているため返品できません'); return; }
-      // 決済
-      seller.balance -= refund; me.balance += refund;
-      if(listing){ listing.sold = Math.max(0,(listing.sold||0)-1); if(listing.qty > listing.sold){ listing.active = true; } }
-      // rights を削除
-      state.rights = state.rights.filter(x=>x.id!==r.id);
-      addTx({type:'return', from:r.sellerId, to:r.buyerId, amount:refund, listingId:r.listingId, title:r.title, memo:'返品（手数料は返金されません）'});
-      save(); renderAll(); toast('返品が完了しました（権利は削除されました）');
+      if(r.buyerId!==me.id || r.status!=='owned'){ toast('保有中の自分の権利のみ返品可能'); return; }
+      const l = state.listings.find(x=>x.id===r.listingId); if(!l){ toast('出品情報が見つかりません'); return; }
+      const seller = findUserById(r.sellerId); if(!seller){ toast('販売者が見つかりません'); return; }
+      const refund = Math.floor(l.price * 0.90);
+      if(seller.balance < refund){ toast('販売者の残高が不足しています（返品不可）'); return; }
+
+      seller.balance -= refund;
+      const buyer = findUserById(r.buyerId); buyer.balance += refund;
+      l.sold = Math.max(0, (l.sold||0)-1);
+      if(l.sold < l.qty){ l.active = true; }
+      state.rights = state.rights.filter(x=>x.id!==rightId);
+
+      addTx({type:'return', from:seller.id, to:buyer.id, listingId:l.id, title:r.title, amount:refund, memo:'購入者が返品（手数料は返らない）'});
+      bump(); save(); renderAll(); toast(`返品：${r.title}（返金 ${fmt.format(refund)} coin）`);
     }
 
     function sellerRespond(rightId, action){
@@ -721,18 +730,17 @@
       const r = state.rights.find(x=>x.id===rightId); if(!r) return;
       if(r.sellerId!==me.id){ toast('あなたは販売者ではありません'); return; }
       if(r.status!=='request'){ toast('この権利は待機中ではありません'); return; }
+      const l = state.listings.find(x=>x.id===r.listingId); if(!l){ toast('出品情報が見つかりません'); return; }
       if(action==='exec'){
         r.status='seller_executed';
         addTx({type:'execute-done', from:r.sellerId, to:r.buyerId, listingId:r.listingId, title:r.title, memo:'販売者が実行'});
-        save(); renderAll(); toast('実行を報告しました');
+        bump(); save(); renderAll(); toast('実行を報告しました');
       }else{
-        // キャンセル申請：全額返金できるだけの残高が必要
-        const listing = state.listings.find(l=>l.id===r.listingId);
-        const price = r.price || (listing? listing.price : 0);
-        if(me.balance < price){ toast('残額が不足しています'); renderRightRequestBanner(); return; }
+        const seller = findUserById(r.sellerId);
+        if(seller.balance < l.price){ toast('残額が不足しています'); return; }
         r.status='seller_cancel_requested';
         addTx({type:'execute-cancel-ask', from:r.sellerId, to:r.buyerId, listingId:r.listingId, title:r.title, memo:'販売者がキャンセル申請'});
-        save(); renderAll(); toast('キャンセル申請を送信しました');
+        bump(); save(); renderAll(); toast('キャンセルを申請しました');
       }
     }
 
@@ -740,29 +748,23 @@
       const me=currentUser(); if(!me){ toast('ログインが必要'); return; }
       const r = state.rights.find(x=>x.id===rightId); if(!r) return;
       if(r.buyerId!==me.id){ toast('あなたは購入者ではありません'); return; }
-      const seller = findUserById(r.sellerId);
-      const listing = state.listings.find(l=>l.id===r.listingId);
-      const price = r.price || (listing? listing.price : 0);
+      const l = state.listings.find(x=>x.id===r.listingId); if(!l){ toast('出品情報が見つかりません'); return; }
       if(r.status==='seller_executed'){
         r.status='finalized'; r.executed=true;
         addTx({type:'execute-finalize', from:r.buyerId, to:r.sellerId, listingId:r.listingId, title:r.title, memo:'購入者が実行確認（確定）'});
-        save(); renderAll(); toast('実行を確定しました');
+        bump(); save(); renderAll(); toast('実行を確定しました');
       } else if(r.status==='seller_cancel_requested'){
-        // 全額返金：B→A、在庫戻し、権利削除
-        if(!seller){ toast('販売者不明'); return; }
-        if(seller.balance < price){ toast('販売者の残高が不足しています（返金不可）'); return; }
-        seller.balance -= price; me.balance += price;
-        if(listing){ listing.sold = Math.max(0,(listing.sold||0)-1); if(listing.qty > listing.sold){ listing.active = true; } }
-        // rights を削除
-        state.rights = state.rights.filter(x=>x.id!==r.id);
-        addTx({type:'execute-cancel-ok', from:r.buyerId, to:r.sellerId, amount:price, listingId:r.listingId, title:r.title, memo:'キャンセル返金（全額）'});
-        save(); renderAll(); toast('キャンセルを確定しました（全額返金・権利削除）');
-      } else {
-        toast('確定可能な状態ではありません');
-      }
+        const seller = findUserById(r.sellerId);
+        const buyer = findUserById(r.buyerId);
+        if(seller.balance < l.price){ toast('販売者の残高が不足しています（確定不可）'); return; }
+        seller.balance -= l.price; buyer.balance += l.price;
+        l.sold = Math.max(0, (l.sold||0)-1); if(l.sold < l.qty){ l.active = true; }
+        state.rights = state.rights.filter(x=>x.id!==rightId);
+        addTx({type:'execute-cancel-ok', from:r.buyerId, to:r.sellerId, listingId:r.listingId, title:r.title, amount:l.price, memo:'キャンセル返金（全額）確定'});
+        bump(); save(); renderAll(); toast('キャンセル（全額返金）を確定しました');
+      } else { toast('確定可能な状態ではありません'); }
     }
 
-    // ---------- Morning bonus ----------
     const MORNING_HOUR = 7, MORNING_MINUTE = 30, MORNING_BASE = 1000, STREAK_MAX = 30, STREAK_INC = 100;
     function todayKey(){ const d = new Date(); const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
     function beforeDeadline(){ const n=new Date(); if(n.getHours()<MORNING_HOUR) return true; if(n.getHours()>MORNING_HOUR) return false; return n.getMinutes()<=MORNING_MINUTE; }
@@ -790,10 +792,9 @@
       const bonus = MORNING_BASE + STREAK_INC * (me.streakCount||0);
       me.balance += bonus;
       addTx({ type:'mint', to: me.id, amount: bonus, memo:`朝活（連続${me.streakCount}日）` });
-      save(); renderAll(); toast(`朝活 +${fmt.format(bonus)} coin（連続${me.streakCount}日）`);
+      bump(); save(); renderAll(); toast(`朝活 +${fmt.format(bonus)} coin（連続${me.streakCount}日）`);
     }
 
-    // ---------- Gamble ----------
     function renderJackpot(){
       const j = jackpotUser();
       const bal = j? j.balance : 0;
@@ -821,7 +822,7 @@
           j.balance = 0;
           els.rouletteResult.textContent = `結果: JACKPOT!! +${fmt.format(payout)} coin`;
         } else { els.rouletteResult.textContent = `結果: JACKPOT発生もプール0`; }
-        save(); renderAll(); return;
+        bump(); save(); renderAll(); return;
       }
       const prizes = [{p:0.40, v:0},{p:0.25, v:50},{p:0.18, v:100},{p:0.09, v:150},{p:0.05, v:200},{p:0.02, v:400},{p:0.0099, v:700}];
       let r = Math.random(), acc=0, val=0;
@@ -829,10 +830,9 @@
       const payout = Math.min(j.balance, val);
       if(payout>0){ me.balance += payout; j.balance -= payout; addTx({ type:'roulette', from: j.id, to: me.id, amount: payout, memo:'ルーレット払い出し' }); }
       els.rouletteResult.textContent = `結果: +${fmt.format(payout)} coin`;
-      save(); renderAll();
+      bump(); save(); renderAll();
     }
 
-    // ---------- Rendering ----------
     function renderSummary(){
       els.kpiMembers.textContent = state.users.filter(u=>!isJackpot(u)).length;
       const sumBalances = state.users.reduce((s,u)=>s+(u.balance||0),0);
@@ -912,12 +912,12 @@
     function typeLabel(tp){
       return tp==='transfer'?'送金'
         : tp==='purchase'?'購入'
-        : tp==='return'?'返品'
         : tp==='execute-request'?'実行申請'
         : tp==='execute-done'?'実行（販売者）'
         : tp==='execute-finalize'?'実行確定（購入者）'
         : tp==='execute-cancel-ask'?'キャンセル申請（販売者）'
         : tp==='execute-cancel-ok'?'キャンセル確定（購入者）'
+        : tp==='return'?'返品'
         : tp==='mint'?'発行'
         : tp==='burn'?'焼却'
         : tp==='fee'?'手数料'
@@ -947,7 +947,7 @@
           } else {
             const buy = document.createElement('button'); buy.className='btn'; buy.textContent='購入';
             buy.disabled = !l.active || remaining<=0 || isJackpot(me);
-            buy.onclick=()=>{ buy.disabled=true; buyListing(l.id); }; // 押下即グレー→処理完了で再描画
+            buy.onclick=()=>{ buy.disabled=true; buyListing(l.id); };
             tdA.appendChild(buy);
           }
         } else {
@@ -986,9 +986,9 @@
     function rightActionButtons(r){
       const span = document.createElement('span');
       if(r.status==='owned'){
-        const req = document.createElement('button'); req.className='btn warn'; req.textContent='実行を申請'; req.onclick=()=>{ req.disabled=true; buyerRequest(r.id); };
+        const btn = document.createElement('button'); btn.className='btn warn'; btn.textContent='実行を申請'; btn.onclick=()=>{ btn.disabled=true; buyerRequest(r.id); };
         const ret = document.createElement('button'); ret.className='btn danger'; ret.textContent='返品'; ret.onclick=()=>{ ret.disabled=true; buyerReturn(r.id); };
-        span.appendChild(req); span.appendChild(document.createTextNode(' ')); span.appendChild(ret);
+        span.appendChild(btn); span.appendChild(document.createTextNode(' ')); span.appendChild(ret);
       } else if(r.status==='seller_executed'){
         const btn = document.createElement('button'); btn.className='btn'; btn.textContent='済（確定）'; btn.onclick=()=>{ btn.disabled=true; buyerFinalize(r.id); };
         span.appendChild(btn);
@@ -1001,19 +1001,14 @@
       return span;
     }
 
-    // ---------- Market subtabs ----------
     function switchMarketSub(which){
       els.subtabs.forEach(s=> s.classList.toggle('active', s.dataset.sub===which));
       els.marketSell.style.display = which==='sell' ? 'block' : 'none';
       els.marketList.style.display = which==='list' ? 'block' : 'none';
     }
 
-    // ---------- Banners Rendering ----------
     function renderApprovalBanner(forceGray){
-      if(!state.approval.active){
-        els.approvalBanner.style.display='none';
-        return;
-      }
+      if(!state.approval.active){ els.approvalBanner.style.display='none'; return; }
       const to=findUserById(state.approval.toId);
       const amt=state.approval.amount||0;
       els.approvalText.textContent = `ジャックポットが ${to?to.name:'?'} に ${fmt.format(amt)} coin を送金しようとしています` + (state.approval.memo? `（${state.approval.memo}）` : '');
@@ -1054,54 +1049,39 @@
       show(active? active.dataset.tab : 'transfer');
     }
 
-    function renderAll(){
-      renderSummary(); renderWallets(); renderHeaderUser(); renderSelects(); renderHistory(); renderListings(); renderRights(); renderTabs();
-    }
+    function renderAll(){ renderSummary(); renderWallets(); renderHeaderUser(); renderSelects(); renderHistory(); renderListings(); renderRights(); renderTabs(); }
 
-    // ---------- Events ----------
+    let syncTimer = null;
+    function syncDebounced(){ if(!sync.connected) return; if(syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(()=>{ sync.broadcastState(); }, 180); }
+
     els.registerBtn.addEventListener('click', ()=> register(els.regName.value, els.regPass.value));
     els.loginBtn.addEventListener('click', ()=> login(els.loginName.value, els.loginPass.value));
     els.logoutBtn.addEventListener('click', logout);
-
-    els.sendBtn.addEventListener('click', ()=>{ els.sendBtn.disabled=true; transfer(els.toSelect.value, els.amountInput.value, els.memoInput.value); els.amountInput.value=''; els.memoInput.value=''; els.sendBtn.disabled=false; });
-
+    els.sendBtn.addEventListener('click', ()=>{ transfer(els.toSelect.value, els.amountInput.value, els.memoInput.value); els.amountInput.value=''; els.memoInput.value=''; });
     els.searchInput.addEventListener('input', renderHistory);
     els.memberFilter.addEventListener('change', renderHistory);
-
     els.exportBtn.addEventListener('click', exportJSON);
     els.importFile.addEventListener('change', (e)=>{ const f=e.target.files[0]; if(f) importJSON(f); e.target.value=''; });
-
     els.createListingBtn.addEventListener('click', ()=> createListing(els.listTitle.value, els.listPrice.value, els.listDesc.value));
-
-    els.tabs.forEach(t=> t.addEventListener('click', ()=>{ document.querySelectorAll('.tabbar .tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); renderTabs(); }));
+    els.tabs.forEach(t=> t.addEventListener('click', ()=>{ document.querySelectorAll('.tabbar .tab').forEach(x=>x.classList.remove('active')); t.addEventListener('animationend',()=>{}, {once:true}); t.classList.add('active'); renderTabs(); }));
     els.subtabs.forEach(s=> s.addEventListener('click', ()=> switchMarketSub(s.dataset.sub)));
-
     els.morningBtn.addEventListener('click', morningClaim);
-
     els.rouletteBtn.addEventListener('click', rouletteSpin);
-
-    // Approvals
     els.btnApprove.addEventListener('click', ()=> approve(true));
-    els.btnReject.addEventListener('click', ()=>{
-      const me=currentUser();
-      if(me && isJackpot(me)){ cancelApproval(); } else { approve(false); }
-    });
+    els.btnReject.addEventListener('click', ()=>{ const me=currentUser(); if(me && isJackpot(me)){ cancelApproval(); } else { approve(false); } });
+    els.btnConnect.addEventListener('click', ()=> sync.connect());
+    els.btnDisconnect.addEventListener('click', ()=> sync.disconnect());
+    els.btnBroadcast.addEventListener('click', ()=> sync.broadcastState());
 
-    // 初回ロード & マイグレーション
-    load();
-    ensureJackpotUser();
-    // 旧 state からの移行（在庫・ステータス補完）
+    load(); ensureJackpotUser();
     state.listings.forEach(l=>{ if(typeof l.qty!=='number') l.qty=1; if(typeof l.sold!=='number') l.sold=0; });
-    state.rights.forEach(r=>{
-      if(!r.status){ r.status = r.executed? 'finalized':'owned'; }
-      if(typeof r.price!=='number'){ const ls=state.listings.find(x=>x.id===r.listingId); r.price = ls? ls.price:0; }
-    });
+    state.rights.forEach(r=>{ if(!r.status){ r.status = r.executed? 'finalized':'owned'; } });
     if(typeof state.jackpot === 'number'){ jackpotUser().balance += state.jackpot; delete state.jackpot; }
     state.txs.forEach(t=>{ if(t.to==='_jackpot'){ t.to = state.jackpotUserId; } if(t.from==='_jackpot'){ t.from = state.jackpotUserId; } });
     state.users.forEach(u=>{ if(typeof u.streakCount!=='number') u.streakCount=0; if(typeof u.lastMorningDate!=='string') u.lastMorningDate=''; });
 
-    save();
-    renderAll();
+    sync.loadSettings();
+    save(true); renderAll();
     setInterval(()=>{ try{ updateMorningButton(); renderApprovalBanner(); renderRightRequestBanner(); }catch(e){} }, 30000);
 
     if(state.users.filter(u=>!isJackpot(u)).length===0){ toast(`まずは新規登録してください（初期残高は 10,000 coin） / ${JACKPOT_NAME} はパス不要で誰でもログイン可`); }
