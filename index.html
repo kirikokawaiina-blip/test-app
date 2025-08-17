@@ -1,1091 +1,135 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>trpg鯖 トークン | Cloudflare同期版 v12</title>
-  <meta name="description" content="擬似トークン送受領・権利マーケット（在庫/削除/返品）・朝活ストリーク・ギャンブル。ジャックポットはユーザーとして存在（直接入金不可）。Cloudflare WorkersのWebSocketを使ったルーム同期対応。" />
-  <style>
-    :root {
-      --bg: #0b1220;
-      --bg-2: #0e1730;
-      --card: #0f172a;
-      --muted: #94a3b8;
-      --text: #e5edf6;
-      --line: #1f2a44;
-      --accent: #15c7b6;
-      --accent-2: #60efff;
-      --danger: #ef4444;
-      --warn: #f59e0b;
-      --ok: #22c55e;
-      --shadow: 0 10px 35px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.35);
-      --radius: 18px;
-    }
-    * { box-sizing: border-box; }
-    html, body { height: 100%; }
-    body {
-      margin: 0;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif;
-      color: var(--text);
-      background: radial-gradient(1200px 800px at 20% -10%, #11224e 0%, transparent 65%),
-                  radial-gradient(800px 800px at 110% 10%, rgba(21,199,182,.15) 0%, transparent 55%),
-                  linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
-      overflow-y: auto;
-    }
-    header { position: sticky; top: 0; z-index: 50; backdrop-filter: saturate(120%) blur(14px); background: linear-gradient(180deg, rgba(9,14,30,.8), rgba(12,18,38,.4)); border-bottom: 1px solid rgba(96,239,255,.12); }
-    .nav { max-width: 1200px; margin: 0 auto; padding: 10px 14px; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
-    .logo { display: grid; grid-auto-flow: column; align-items: center; gap: 10px; font-weight: 750; letter-spacing: .3px; font-size: 16px; }
-    .logo-badge { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: conic-gradient(from 200deg, var(--accent), var(--accent-2)); box-shadow: 0 8px 20px rgba(21,199,182,.35); }
-    .chip { padding: 6px 10px; border: 1px solid rgba(96,239,255,.18); border-radius: 999px; color: var(--muted); font-size: 12px; }
-
-    main { max-width: 1200px; margin: 16px auto 40px; padding: 0 14px; }
-    .grid { display: grid; grid-template-columns: 330px 1fr 340px; gap: 14px; }
-    @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
-
-    .card { background: linear-gradient(180deg, rgba(16,25,46,.8), rgba(12,20,38,.8)); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
-    .card .hd { padding: 10px 12px; display:flex; align-items:center; justify-content:space-between; gap:10px; background: linear-gradient(180deg, rgba(22,32,58,.6), rgba(19,28,50,.2)); border-bottom: 1px solid rgba(96,239,255,.1); }
-    .card .hd h3 { margin: 0; font-size: 14px; letter-spacing: .3px; color: #d9e7ff; font-weight: 700; }
-    .card .bd { padding: 12px; }
-
-    .stat { display:grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-    .kpi { padding: 8px; border: 1px solid rgba(96,239,255,.12); border-radius: 12px; background: rgba(17,28,52,.45); }
-    .kpi .lbl { color: var(--muted); font-size: 11px; }
-    .kpi .val { margin-top: 2px; font-size: 16px; font-weight: 800; letter-spacing: .2px; }
-
-    .row { display: grid; gap: 8px; }
-    label { font-size: 12px; color: var(--muted); }
-    input[type="text"], input[type="password"], input[type="number"], select, textarea {
-      width: 100%; padding: 10px 10px; border-radius: 10px; outline: none; color: var(--text);
-      background: rgba(13,21,40,.75); border: 1px solid rgba(96,239,255,.12);
-      transition: border-color .15s ease, box-shadow .15s ease;
-    }
-    input:focus, select:focus, textarea:focus { border-color: rgba(96,239,255,.35); box-shadow: 0 0 0 4px rgba(96,239,255,.12); }
-
-    .btn { appearance: none; border:0; cursor:pointer; color: #04151f; font-weight: 800; letter-spacing: .2px; padding: 10px 12px; border-radius: 10px; transition: transform .05s ease, filter .2s ease, opacity .2s ease; background: linear-gradient(90deg, var(--accent), var(--accent-2)); box-shadow: 0 10px 26px rgba(21,199,182,.35), inset 0 0 0 1px rgba(255,255,255,.18); font-size: 14px; }
-    .btn:active { transform: translateY(1px); }
-    .btn.secondary { color: var(--text); background: transparent; border: 1px solid rgba(96,239,255,.22); box-shadow: none; }
-    .btn.warn { color: #1a1007; background: linear-gradient(90deg, #f59e0b, #fde047); box-shadow: 0 10px 26px rgba(245,158,11,.3); }
-    .btn.danger { color: #1a0b0b; background: linear-gradient(90deg, #ef4444, #fb7185); box-shadow: 0 10px 26px rgba(239,68,68,.32); }
-    .btn:disabled { filter: grayscale(1) brightness(.85); opacity: .6; cursor: not-allowed; box-shadow: none; }
-
-    .wallet-list { display: grid; gap: 6px; }
-    .wallet { padding: 8px 10px; border: 1px solid rgba(96,239,255,.12); border-radius: 10px; display:grid; grid-template-columns: 1fr auto; gap: 8px; align-items:center; background: rgba(14,24,44,.5); }
-    .wallet .name { font-weight: 750; font-size: 14px; }
-    .wallet .balance { font-variant-numeric: tabular-nums; background: rgba(21,199,182,.08); border:1px solid rgba(21,199,182,.24); padding: 4px 8px; border-radius: 999px; font-size: 12px; }
-
-    .history-tools { display:flex; gap: 8px; align-items:center; margin-bottom: 8px; flex-wrap: wrap; }
-    .table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: auto; display:block; border: 1px solid rgba(96,249,255,.08); border-radius: 10px; background: rgba(13,22,40,.4); }
-    .table thead { position: sticky; top: 0; backdrop-filter: blur(8px); background: rgba(15,23,42,.75); }
-    .table th, .table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid rgba(96,239,255,.06); white-space: nowrap; }
-    .table td.memo { white-space: normal; }
-    .pill { padding: 4px 8px; border-radius:999px; font-weight: 700; font-size: 12px; background: rgba(21,199,182,.12); border:1px solid rgba(21,199,182,.32); }
-    .amount { font-variant-numeric: tabular-nums; font-weight: 800; }
-
-    .toolbar { display:flex; gap: 8px; flex-wrap: wrap; }
-
-    .toast { position: fixed; right: 12px; bottom: 12px; display:grid; gap:6px; z-index: 60; }
-    .toast .msg { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(96,239,255,.2); background: rgba(17,27,48,.9); box-shadow: var(--shadow); font-size: 13px; }
-
-    .tabbar { display:flex; gap:6px; flex-wrap:wrap; }
-    .tabbar .tab { padding:6px 10px; border:1px solid rgba(96,239,255,.2); border-radius:999px; background: rgba(15,25,46,.6); cursor:pointer; font-size: 13px; }
-    .tabbar .tab.active { border-color: rgba(96,239,255,.45); background: rgba(21,199,182,.1); }
-
-    .subtabs { display:flex; gap:6px; margin-bottom:6px; flex-wrap: wrap; }
-    .subtabs .sub { padding:5px 8px; border:1px solid rgba(96,239,255,.2); border-radius:999px; cursor:pointer; background: rgba(15,25,46,.6); font-size:12px; }
-    .subtabs .sub.active { border-color: rgba(96,239,255,.45); background: rgba(21,199,182,.1); }
-
-    .panel { border:1px solid rgba(96,239,255,.12); border-radius:10px; padding:10px; background: rgba(12,22,40,.5); }
-
-    .banner { border:1px dashed rgba(245,158,11,.5); background: rgba(245,158,11,.08); border-radius:10px; padding:8px; display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
-    .banner .txt { font-size: 13px; }
-    .banner .actions { display:flex; gap:6px; }
-
-  </style>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>trpg鯖 トークン | Cloudflare同期版 v14 (KV-poll)</title>
+<meta name="description" content="Cloudflare Workers + KV を使ったルーム同期（無料プラン対応）。"/>
+<style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans JP',sans-serif;background:#0b1220;color:#e5edf6}header{position:sticky;top:0;background:#0b132a99;border-bottom:1px solid #60efff22;backdrop-filter:blur(12px)}.nav{max-width:1200px;margin:0 auto;padding:10px 14px;display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}.chip{padding:6px 10px;border:1px solid #60efff33;border-radius:999px;color:#94a3b8;font-size:12px}.btn{appearance:none;border:0;border-radius:10px;background:linear-gradient(90deg,#15c7b6,#60efff);padding:10px 12px;font-weight:800;cursor:pointer}.btn.secondary{background:transparent;border:1px solid #60efff55;color:#e5edf6}.grid{max-width:1200px;margin:16px auto 40px;padding:0 14px;display:grid;grid-template-columns:330px 1fr 340px;gap:14px}@media(max-width:1100px){.grid{grid-template-columns:1fr}}.card{background:#0f172acc;border:1px solid #1f2a44;border-radius:16px;box-shadow:0 10px 35px #0007}.card .hd{padding:10px;border-bottom:1px solid #60efff22}.card .bd{padding:12px}.tabbar{display:flex;gap:6px;flex-wrap:wrap}.tab{padding:6px 10px;border:1px solid #60efff33;border-radius:999px;cursor:pointer}.tab.active{background:#15c7b61a;border-color:#60efff66}.panel{border:1px solid #60efff22;border-radius:10px;padding:10px;background:#0c1628bb}.table{width:100%;display:block;border:1px solid #60efff13;border-radius:10px}.table table{width:100%;border-collapse:separate;border-spacing:0;min-width:760px}.table th,.table td{padding:8px 10px;border-bottom:1px solid #60efff10;white-space:nowrap}.pill{padding:4px 8px;border:1px solid #15c7b652;border-radius:999px;background:#15c7b61a}.toast{position:fixed;right:12px;bottom:12px;display:grid;gap:6px}</style>
 </head>
 <body>
-  <header>
-    <div class="nav">
-      <div class="logo">
-        <div class="logo-badge"></div>
-        trpg鯖 トークン
-        <span class="chip">ローカル保存 & ルーム同期</span>
-      </div>
-      <div class="toolbar">
-        <div id="userBadge" class="chip">未ログイン</div>
-        <div id="actingBadge" class="chip" title="ジャックポット操作の代理人" style="display:none;">acting: —</div>
-        <div id="streakBadge" class="chip" title="朝活ストリーク">🔥0</div>
-        <div id="jackpotBadge" class="chip" title="TRPGジャックポット">JPOT: 0</div>
-        <button class="btn" id="morningBtn" title="朝活ボーナス：7:30までに押すと1日1回">朝活</button>
-        <button class="btn secondary" id="exportBtn">エクスポート</button>
-        <label class="btn secondary" for="importFile">インポート<input type="file" id="importFile" accept="application/json" style="display:none" /></label>
-      </div>
+<header><div class="nav"><div style="display:flex;gap:10px;align-items:center"><div style="width:28px;height:28px;border-radius:8px;background:conic-gradient(from 200deg,#15c7b6,#60efff)"></div>trpg鯖 トークン<span class="chip">ローカル保存 & ルーム同期（KV）</span></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><div id="userBadge" class="chip">未ログイン</div><div id="streakBadge" class="chip">🔥0</div><div id="jackpotBadge" class="chip">JPOT: 0</div><button class="btn" id="morningBtn">朝活</button><button class="btn secondary" id="exportBtn">エクスポート</button><label class="btn secondary">インポート<input id="importFile" type="file" accept="application/json" style="display:none"/></label></div></div></header>
+<main><div class="grid">
+<section class="card"><div class="hd"><h3>アカウント & 同期</h3></div><div class="bd">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+    <div class="panel"><div class="chip">総ユーザー（JPOT除外）</div><div id="kpiMembers" style="font-weight:800">0</div></div>
+    <div class="panel"><div class="chip">総供給量</div><div id="kpiSupply" style="font-weight:800">0 coin</div></div>
+  </div>
+  <div class="panel">
+    <label>同期設定（HTTP API /state）</label>
+    <input id="syncUrl" type="text" placeholder="https://<your-worker>.workers.dev/state" style="width:100%;margin:6px 0"/>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <input id="syncRoom" type="text" placeholder="ルーム名（例：trpg）"/>
+      <input id="syncKey" type="text" placeholder="ルーム鍵（例：1）"/>
     </div>
-  </header>
-
-  <main>
-    <div class="grid">
-      <section class="card" aria-label="アカウント">
-        <div class="hd"><h3>アカウント & 同期</h3></div>
-        <div class="bd">
-          <div class="stat" id="summary">
-            <div class="kpi"><div class="lbl">総ユーザー（JPOT除外）</div><div class="val" id="kpiMembers">0</div></div>
-            <div class="kpi"><div class="lbl">総供給量</div><div class="val" id="kpiSupply">0 coin</div></div>
-          </div>
-
-          <div class="row panel" style="margin-bottom:8px;">
-            <label>同期設定（Cloudflare Workers の WSS）</label>
-            <input id="syncUrl" type="text" placeholder="wss://<your-worker>.<subdomain>.workers.dev/ws" />
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-              <input id="syncRoom" type="text" placeholder="ルーム名（例：trpg-guild）" />
-              <input id="syncKey" type="text" placeholder="ルーム鍵（友達だけで共有）" />
-            </div>
-            <div class="toolbar">
-              <button class="btn" id="btnConnect">接続</button>
-              <button class="btn secondary" id="btnDisconnect">切断</button>
-              <button class="btn warn" id="btnBroadcast">いまの状態を送信</button>
-              <span id="syncStatus" class="chip">未接続</span>
-            </div>
-          </div>
-
-          <div class="row" style="margin-bottom:8px;">
-            <div class="row panel">
-              <label for="loginName">ログイン</label>
-              <input id="loginName" type="text" placeholder="ユーザー名（ジャックポットはパス不要）" />
-              <input id="loginPass" type="password" placeholder="パスワード" />
-              <div class="toolbar">
-                <button class="btn" id="loginBtn">ログイン</button>
-                <button class="btn secondary" id="logoutBtn">ログアウト</button>
-              </div>
-            </div>
-            <div class="row panel">
-              <label for="regName">新規登録（初期残高 10,000 coin）</label>
-              <input id="regName" type="text" placeholder="ユーザー名（重複不可）" />
-              <input id="regPass" type="password" placeholder="パスワード" />
-              <button class="btn" id="registerBtn">登録</button>
-            </div>
-          </div>
-
-          <div class="row panel">
-            <label>ウォレット一覧</label>
-            <div class="wallet-list" id="walletList" aria-live="polite"></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="card" aria-label="操作">
-        <div class="hd">
-          <h3>操作</h3>
-          <div class="tabbar">
-            <div class="tab active" data-tab="transfer">送金</div>
-            <div class="tab" data-tab="market">マーケット</div>
-            <div class="tab" data-tab="myrights">自分の権利</div>
-            <div class="tab" data-tab="gamble">ギャンブル</div>
-          </div>
-        </div>
-        <div class="bd">
-
-          <div id="approvalBanner" class="banner" style="display:none;">
-            <div class="txt" id="approvalText">—</div>
-            <div class="actions" id="approvalActions">
-              <button class="btn secondary" id="btnReject">拒否</button>
-              <button class="btn" id="btnApprove">許可</button>
-            </div>
-          </div>
-
-          <div id="rightReqBanner" class="banner" style="display:none;">
-            <div class="txt" id="rightReqText">—</div>
-            <div class="actions" id="rightReqActions">
-              <button class="btn secondary" id="btnRightCancel">キャンセル申請</button>
-              <button class="btn" id="btnRightExec">実行</button>
-            </div>
-          </div>
-
-          <div id="tab-transfer">
-            <div class="row" style="grid-template-columns: 1fr 1fr; display:grid; gap:10px;">
-              <div class="row">
-                <label>送信元（あなた）</label>
-                <input id="fromFixed" type="text" disabled placeholder="未ログイン" />
-              </div>
-              <div class="row">
-                <label for="toSelect">送信先</label>
-                <select id="toSelect"></select>
-              </div>
-            </div>
-            <div class="row" style="margin-top:8px; grid-template-columns: 1fr 140px; display:grid; gap:10px;">
-              <div class="row">
-                <label for="amountInput">金額（coin）</label>
-                <input id="amountInput" type="number" min="1" step="1" placeholder="例）250" />
-              </div>
-              <div class="row">
-                <label>&nbsp;</label>
-                <button class="btn" id="sendBtn">送信する</button>
-              </div>
-            </div>
-            <div class="row" style="margin-top:8px;">
-              <label for="memoInput">メモ（任意）</label>
-              <input id="memoInput" type="text" placeholder="例）ギルド賞金" />
-            </div>
-          </div>
-
-          <div id="tab-market" style="display:none;">
-            <div class="subtabs">
-              <div class="sub active" data-sub="sell">出品する</div>
-              <div class="sub" data-sub="list">出品一覧</div>
-            </div>
-            <div id="market-sell">
-              <div class="row panel">
-                <label>権利の出品（販売者）</label>
-                <input id="listTitle" type="text" placeholder="例）ゲームを一緒に遊ぶ" />
-                <textarea id="listDesc" rows="2" placeholder="説明（任意）"></textarea>
-                <div style="display:grid; grid-template-columns: 1fr 1fr 140px; gap:8px;">
-                  <div class="row">
-                    <label for="listPrice">価格（coin）</label>
-                    <input id="listPrice" type="number" min="1" step="1" placeholder="例）1000" />
-                  </div>
-                  <div class="row">
-                    <label for="listQty">在庫（個数）</label>
-                    <input id="listQty" type="number" min="1" step="1" placeholder="例）5" />
-                  </div>
-                  <div class="row">
-                    <label>&nbsp;</label>
-                    <button class="btn" id="createListingBtn">出品する</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div id="market-list" style="display:none;">
-              <div class="row">
-                <label>出品一覧</label>
-                <div class="table" role="region" aria-label="出品一覧">
-                  <table style="min-width:860px; width:100%;">
-                    <thead>
-                      <tr>
-                        <th>タイトル</th>
-                        <th>価格</th>
-                        <th>在庫</th>
-                        <th>出品者</th>
-                        <th>説明</th>
-                        <th>操作</th>
-                      </tr>
-                    </thead>
-                    <tbody id="listingBody"></tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div id="tab-myrights" style="display:none;">
-            <div class="row">
-              <label>自分が保有する権利</label>
-              <div class="table" role="region" aria-label="自分の権利">
-                <table style="min-width:860px; width:100%;">
-                  <thead>
-                    <tr>
-                      <th>日付</th>
-                      <th>タイトル</th>
-                      <th>販売者</th>
-                      <th>状態</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody id="rightsBody"></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div id="tab-gamble" style="display:none;">
-            <div class="row panel">
-              <label>TRPGジャックポット（ユーザー残高）</label>
-              <div class="toolbar">
-                <div class="chip" id="jackpotChip">現在: 0 coin</div>
-              </div>
-            </div>
-            <div class="row panel">
-              <h4 style="margin:0;">🎰 ルーレット（1回100 coin）</h4>
-              <p style="margin:0; color:var(--muted); font-size:12px;">期待値は約70%。1%で<strong>ジャックポット全額</strong>。参加費はJPOTに加算、払い出しはJPOTから。</p>
-              <div class="toolbar">
-                <button class="btn" id="rouletteBtn">回す</button>
-              </div>
-              <div id="rouletteResult" class="chip" style="margin-top:8px;">結果: —</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="card" aria-label="履歴">
-        <div class="hd">
-          <h3>履歴</h3>
-          <div class="history-tools">
-            <input id="searchInput" type="text" placeholder="検索：名前 / メモ / 権利" style="width:200px" />
-            <select id="memberFilter"><option value="">すべて</option></select>
-            <div id="lastActivity" class="chip">最終更新：—</div>
-          </div>
-        </div>
-        <div class="bd">
-          <div class="table" role="region" aria-label="履歴テーブル">
-            <table style="min-width:760px; width:100%;">
-              <thead>
-                <tr>
-                  <th>日付</th>
-                  <th>種別</th>
-                  <th>送信元 / 販売者</th>
-                  <th>送信先 / 購入者</th>
-                  <th>メモ / 権利</th>
-                  <th style="text-align:right;">金額</th>
-                </tr>
-              </thead>
-              <tbody id="historyBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
+    <div class="tabbar" style="margin-top:8px"><button class="btn" id="btnConnect">開始/停止</button><button class="btn secondary" id="btnSyncNow">手動同期</button><span id="syncStatus" class="chip">停止中</span></div>
+    <div id="lastSyncChip" class="chip" style="margin-top:6px">最終同期：—</div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+    <div class="panel">
+      <label>ログイン</label>
+      <input id="loginName" type="text" placeholder="ユーザー名"/><input id="loginPass" type="password" placeholder="パスワード"/>
+      <div class="tabbar"><button class="btn" id="loginBtn">ログイン</button><button class="btn secondary" id="logoutBtn">ログアウト</button></div>
     </div>
-  </main>
-
-  <div class="toast" id="toast" aria-live="polite"></div>
-
-  <script>
-  (function(){
-    const LS_KEY = 'trpg_token_state_v12_cfws';
-    const LS_SYNC = 'trpg_token_sync_settings';
-    const INITIAL_BAL = 10000;
-    const JACKPOT_NAME = 'ジャックポット';
-
-    let state = { users: [], txs: [], listings: [], rights: [], currentUserId: null, jackpotUserId: '', lastRealUserId: null, approval:{active:false, votes:{}}, version: 12, vTick: 0 };
-
-    const sync = {
-      ws: null,
-      clientId: (localStorage.getItem('trpg_token_client_id') || Math.random().toString(36).slice(2)),
-      url: '', room: '', key: '',
-      connected: false,
-      saveSettings(){ const s = { url: sync.url, room: sync.room, key: sync.key }; localStorage.setItem(LS_SYNC, JSON.stringify(s)); },
-      loadSettings(){ try { const raw = localStorage.getItem(LS_SYNC); if(raw){ const s=JSON.parse(raw); sync.url=s.url||''; sync.room=s.room||''; sync.key=s.key||''; } } catch(e){}; els.syncUrl.value = sync.url; els.syncRoom.value = sync.room; els.syncKey.value = sync.key; },
-      connect(){
-        if(sync.connected){ toast('すでに接続中'); return; }
-        sync.url = (els.syncUrl.value||'').trim();
-        sync.room = (els.syncRoom.value||'').trim();
-        sync.key = (els.syncKey.value||'').trim();
-        if(!sync.url || !sync.room || !sync.key){ toast('URL / ルーム / 鍵 を入力してください'); return; }
-        try { sync.ws = new WebSocket(sync.url.replace(/^http/, 'ws')); } catch(e){ toast('URLが正しくありません'); return; }
-        sync.saveSettings();
-        els.syncStatus.textContent = '接続中…';
-        sync.ws.onopen = () => {
-          sync.connected = true;
-          els.syncStatus.textContent = '接続済み';
-          sync.ws.send(JSON.stringify({ type:'join', room: sync.room, key: sync.key, cid: sync.clientId }));
-          setTimeout(()=>{ sync.send({ type:'app', action:'hello', cid: sync.clientId }); }, 300);
-        };
-        sync.ws.onmessage = (ev) => {
-          let msg={}; try{ msg=JSON.parse(ev.data); }catch{};
-          if(msg.type==='app'){
-            if(msg.cid && msg.cid===sync.clientId) return;
-            if(msg.action==='hello'){ setTimeout(()=>{ sync.broadcastState(); }, 300); }
-            if(msg.action==='state' && msg.state){
-              if(typeof msg.state.vTick === 'number' && msg.state.vTick > (state.vTick||0)){
-                state = msg.state;
-                state.currentUserId = localStorage.getItem('last_current_uid') || null;
-                save(true); renderAll(); toast('同期：最新状態を受信しました');
-              }
-            }
-          }
-        };
-        sync.ws.onclose = () => { sync.connected=false; els.syncStatus.textContent='未接続'; };
-        sync.ws.onerror = () => { sync.connected=false; els.syncStatus.textContent='未接続（エラー）'; };
-      },
-      disconnect(){ if(sync.ws){ try{ sync.ws.close(); }catch{} } sync.connected=false; els.syncStatus.textContent='未接続'; toast('切断しました'); },
-      send(obj){ if(!sync.connected || !sync.ws) return; try { sync.ws.send(JSON.stringify(obj)); } catch(e){} },
-      broadcastState(){ const tmp = Object.assign({}, state, { currentUserId: null }); sync.send({ type:'app', action:'state', cid: sync.clientId, state: tmp }); }
-    };
-    localStorage.setItem('trpg_token_client_id', sync.clientId);
-
-    const els = {
-      kpiMembers: document.getElementById('kpiMembers'),
-      kpiSupply: document.getElementById('kpiSupply'),
-      walletList: document.getElementById('walletList'),
-      toSelect: document.getElementById('toSelect'),
-      sendBtn: document.getElementById('sendBtn'),
-      amountInput: document.getElementById('amountInput'),
-      memoInput: document.getElementById('memoInput'),
-      historyBody: document.getElementById('historyBody'),
-      searchInput: document.getElementById('searchInput'),
-      memberFilter: document.getElementById('memberFilter'),
-      exportBtn: document.getElementById('exportBtn'),
-      importFile: document.getElementById('importFile'),
-      lastActivity: document.getElementById('lastActivity'),
-      toast: document.getElementById('toast'),
-      userBadge: document.getElementById('userBadge'),
-      actingBadge: document.getElementById('actingBadge'),
-      fromFixed: document.getElementById('fromFixed'),
-      streakBadge: document.getElementById('streakBadge'),
-      jackpotBadge: document.getElementById('jackpotBadge'),
-      morningBtn: document.getElementById('morningBtn'),
-      loginName: document.getElementById('loginName'),
-      loginPass: document.getElementById('loginPass'),
-      loginBtn: document.getElementById('loginBtn'),
-      logoutBtn: document.getElementById('logoutBtn'),
-      regName: document.getElementById('regName'),
-      regPass: document.getElementById('regPass'),
-      registerBtn: document.getElementById('registerBtn'),
-      tabs: Array.from(document.querySelectorAll('.tabbar .tab')),
-      tabTransfer: document.getElementById('tab-transfer'),
-      tabMarket: document.getElementById('tab-market'),
-      tabMyRights: document.getElementById('tab-myrights'),
-      tabGamble: document.getElementById('tab-gamble'),
-      listTitle: document.getElementById('listTitle'),
-      listDesc: document.getElementById('listDesc'),
-      listPrice: document.getElementById('listPrice'),
-      listQty: document.getElementById('listQty'),
-      createListingBtn: document.getElementById('createListingBtn'),
-      listingBody: document.getElementById('listingBody'),
-      rightsBody: document.getElementById('rightsBody'),
-      subtabs: Array.from(document.querySelectorAll('#tab-market .subtabs .sub')),
-      marketSell: document.getElementById('market-sell'),
-      marketList: document.getElementById('market-list'),
-      jackpotChip: document.getElementById('jackpotChip'),
-      rouletteBtn: document.getElementById('rouletteBtn'),
-      rouletteResult: document.getElementById('rouletteResult'),
-      approvalBanner: document.getElementById('approvalBanner'),
-      approvalText: document.getElementById('approvalText'),
-      approvalActions: document.getElementById('approvalActions'),
-      btnApprove: document.getElementById('btnApprove'),
-      btnReject: document.getElementById('btnReject'),
-      rightReqBanner: document.getElementById('rightReqBanner'),
-      rightReqText: document.getElementById('rightReqText'),
-      rightReqActions: document.getElementById('rightReqActions'),
-      btnRightExec: document.getElementById('btnRightExec'),
-      btnRightCancel: document.getElementById('btnRightCancel'),
-      syncUrl: document.getElementById('syncUrl'),
-      syncRoom: document.getElementById('syncRoom'),
-      syncKey: document.getElementById('syncKey'),
-      btnConnect: document.getElementById('btnConnect'),
-      btnDisconnect: document.getElementById('btnDisconnect'),
-      btnBroadcast: document.getElementById('btnBroadcast'),
-      syncStatus: document.getElementById('syncStatus'),
-    };
-
-    const fmt = new Intl.NumberFormat('ja-JP');
-    const coins = n => `${fmt.format(n)} coin`;
-    const ts2str = ts => { const d = new Date(ts); const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; };
-    const id = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
-    const escapeHtml = (s)=> String(s).replace(/[&<>\"']/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-    const pill = (txt)=> `<span class="pill">${escapeHtml(txt)}</span>`;
-
-    function save(skipBroadcast){ localStorage.setItem(LS_KEY, JSON.stringify(state)); if(!skipBroadcast){ syncDebounced(); } }
-    function load(){ try { const raw = localStorage.getItem(LS_KEY); if(raw){ state = JSON.parse(raw); } } catch(e){}; if(typeof state.vTick!=='number') state.vTick=0; }
-
-    function toast(msg){
-      const div = document.createElement('div'); div.className = 'msg'; div.textContent = msg; els.toast.appendChild(div);
-      setTimeout(()=>{ div.style.opacity = '0'; div.style.transform = 'translateY(4px)'; }, 2400);
-      setTimeout(()=>{ div.remove(); }, 3000);
-    }
-
-    async function sha256(text){
-      const enc = new TextEncoder().encode(text);
-      const buf = await crypto.subtle.digest('SHA-256', enc);
-      return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-    }
-
-    function findUserById(uid){ return state.users.find(u=>u.id===uid)||null; }
-    function findUserByName(name){ return state.users.find(u=>u.name===name)||null; }
-    function jackpotUser(){ return findUserById(state.jackpotUserId); }
-    function isJackpot(u){ return u && u.id===state.jackpotUserId; }
-    function nameOf(uid){ const u=findUserById(uid); return u?u.name:''; }
-
-    function ensureJackpotUser(){
-      let j = findUserByName(JACKPOT_NAME);
-      if(!j){ j = { id: id(), name: JACKPOT_NAME, passHash: '', balance: 0, streakCount: 0, lastMorningDate: '' }; state.users.unshift(j); }
-      state.jackpotUserId = j.id;
-    }
-
-    async function register(name, pass){
-      name = (name||'').trim();
-      if(!name || !pass){ toast('ユーザー名とパスワードを入力'); return; }
-      if(name===JACKPOT_NAME){ toast('この名前は予約されています'); return; }
-      if(state.users.some(u=>u.name===name)){ toast('そのユーザー名は使用済み'); return; }
-      const passHash = await sha256(pass);
-      const u = { id: id(), name, passHash, balance: 10000, streakCount: 0, lastMorningDate: '' };
-      state.users.push(u);
-      state.currentUserId = u.id; state.lastRealUserId = u.id;
-      addTx({ type:'mint', to:u.id, amount:10000, memo:'初期発行' });
-      bump(); save(); renderAll(); toast(`登録完了：${name}`);
-    }
-
-    async function login(name, pass){
-      name = (name||'').trim();
-      let u = findUserByName(name);
-      if(!u){ toast('ユーザーが見つかりません'); return; }
-      if(isJackpot(u)){ state.currentUserId = u.id; }
-      else {
-        const passHash = await sha256(pass||'');
-        if(u.passHash !== passHash){ toast('パスワードが違います'); return; }
-        state.currentUserId = u.id; state.lastRealUserId = u.id;
-      }
-      localStorage.setItem('last_current_uid', state.currentUserId || '');
-      save(true); renderAll(); toast(`ログイン：${u.name}`);
-    }
-
-    function logout(){ state.currentUserId = null; localStorage.setItem('last_current_uid',''); save(true); renderAll(); toast('ログアウトしました'); }
-    function currentUser(){ return findUserById(state.currentUserId); }
-
-    function addTx(obj){
-      const now = Date.now(); const base = { id:id(), ts: now };
-      const me = currentUser(); const actedBy = (me && isJackpot(me) && state.lastRealUserId) ? state.lastRealUserId : null;
-      if(actedBy) obj.actedBy = actedBy;
-      state.txs.unshift(Object.assign(base, obj));
-    }
-    function bump(){ state.vTick = (state.vTick||0) + 1; }
-
-    function startApproval(toId, amount, memo){
-      const j = jackpotUser();
-      if(!j) { toast('JPOTが見つかりません'); return; }
-      if(j.balance < amount){ toast('ジャックポット残高が不足しています'); return; }
-      state.approval = { active:true, toId, amount, memo:(memo||'').trim(), votes:{}, ts: Date.now() };
-      bump(); save(); renderAll();
-      toast(`承認依頼：${nameOf(j.id)} → ${nameOf(toId)} に ${fmt.format(amount)} coin`);
-    }
-
-    function approve(agree){
-      const me = currentUser(); if(!me){ toast('ログインが必要です'); return; }
-      if(isJackpot(me)){ toast('ジャックポットは投票できません'); return; }
-      if(!state.approval.active){ toast('承認依頼はありません'); return; }
-      state.approval.votes[me.id] = agree ? 'approve' : 'reject';
-      bump(); save(); renderApprovalBanner(true);
-      checkApproval();
-    }
-
-    function cancelApproval(){
-      const me=currentUser();
-      if(!me || !isJackpot(me)) return;
-      if(!state.approval.active) return;
-      state.approval = {active:false, votes:{}};
-      bump(); save(); renderAll(); toast('承認依頼をキャンセルしました');
-    }
-
-    function checkApproval(){
-      const totalVoters = state.users.filter(u=>!isJackpot(u)).map(u=>u.id);
-      const votes = state.approval.votes || {};
-      if(Object.values(votes).includes('reject')){
-        state.approval = {active:false, votes:{}};
-        bump(); save(); renderAll(); toast('承認：拒否があったためキャンセル');
-        return;
-      }
-      const allApproved = totalVoters.every(uid => votes[uid] === 'approve');
-      if(!allApproved){ bump(); save(); renderAll(); return; }
-      const j = jackpotUser();
-      const to = findUserById(state.approval.toId);
-      const amt = state.approval.amount||0;
-      if(!j || !to){ state.approval={active:false, votes:{}}; bump(); save(); renderAll(); return; }
-      if(j.balance < amt){ state.approval={active:false, votes:{}}; bump(); save(); renderAll(); return; }
-      j.balance -= amt; to.balance += amt;
-      addTx({ type:'transfer', from: j.id, to: to.id, amount: amt, memo: `（全員承認送金）${state.approval.memo||''}` });
-      state.approval = {active:false, votes:{}};
-      bump(); save(); renderAll(); toast(`全員承認 → 送金実行：${nameOf(j.id)} → ${nameOf(to.id)} ${fmt.format(amt)} coin`);
-    }
-
-    function transfer(toId, amount, memo){
-      const from = currentUser();
-      if(!from){ toast('ログインが必要です'); return; }
-      amount = Math.floor(Number(amount));
-      if(!(amount > 0)) { toast('金額は1以上の整数で入力してください'); return; }
-      if(!toId){ toast('送信先を選択してください'); return; }
-      const to = findUserById(toId);
-      if(!to){ toast('送信先が不正です'); return; }
-      if(from.id === toId){ toast('自分自身へは送信できません'); return; }
-
-      if(isJackpot(from)){
-        if(isJackpot(to)){ toast('ジャックポットへは送金できません'); return; }
-        startApproval(toId, amount, memo); return;
-      }
-      if(isJackpot(to)){ toast('ジャックポットへは直接送金できません（手数料・ギャンブルのみ）'); return; }
-
-      if(from.balance < amount){ toast('残高が不足しています'); return; }
-      from.balance -= amount; to.balance += amount;
-      addTx({ type:'transfer', from: from.id, to: to.id, amount, memo: (memo||'').trim() });
-      bump(); save(); renderAll(); toast(`${from.name} → ${to.name} に ${fmt.format(amount)} coin 送信しました`);
-    }
-
-    function exportJSON(){
-      const blob = new Blob([JSON.stringify(state, null, 2)], {type: 'application/json'});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `trpg_token_sync_v12_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
-      a.click(); URL.revokeObjectURL(a.href);
-    }
-
-    function importJSON(file){
-      const reader = new FileReader();
-      reader.onload = (e)=>{
-        try { const data = JSON.parse(e.target.result);
-          if(!data || !Array.isArray(data.users) || !Array.isArray(data.txs)) throw new Error('不正な形式');
-          const keepUid = state.currentUserId;
-          state = Object.assign({version:12, approval:{active:false, votes:{}}, lastRealUserId: null, vTick:(state.vTick||0)+1}, data);
-          state.currentUserId = keepUid || null;
-          ensureJackpotUser();
-          state.listings.forEach(l=>{ if(typeof l.qty!=='number') l.qty=1; if(typeof l.sold!=='number') l.sold=0; });
-          state.rights.forEach(r=>{ if(!r.status){ r.status = r.executed? 'finalized':'owned'; } });
-          save(); renderAll(); toast('インポートしました');
-        } catch(err){ toast('読み込みに失敗しました'); }
-      };
-      reader.readAsText(file);
-    }
-
-    function createListing(title, price, desc){
-      const seller = currentUser();
-      if(!seller){ toast('ログインが必要です'); return; }
-      if(isJackpot(seller)){ toast('ジャックポットでは出品できません'); return; }
-      title = (title||'').trim(); desc = (desc||'').trim(); price = Math.floor(Number(price));
-      let qty = Math.floor(Number(els.listQty.value||1));
-      if(!title){ toast('タイトルを入力してください'); return; }
-      if(!(price>0)){ toast('価格は1以上の整数'); return; }
-      if(!(qty>0)){ toast('在庫は1以上の整数'); return; }
-      const listing = { id:id(), title, price, desc, sellerId: seller.id, active:true, ts: Date.now(), qty, sold: 0 };
-      state.listings.unshift(listing);
-      bump(); save(); renderAll(); toast('出品しました');
-      els.listTitle.value=''; els.listDesc.value=''; els.listPrice.value=''; els.listQty.value='';
-      switchMarketSub('list');
-    }
-
-    function buyListing(listingId){
-      const buyer = currentUser(); if(!buyer){ toast('ログインが必要です'); return; }
-      const l = state.listings.find(x=>x.id===listingId && x.active);
-      if(!l){ toast('出品が見つかりません'); return; }
-      if(l.sellerId === buyer.id){ toast('自分の出品は購入できません'); return; }
-      if(isJackpot(buyer)){ toast('ジャックポットでは購入できません'); return; }
-      const remaining = (l.qty||1) - (l.sold||0);
-      if(remaining<=0){ toast('在庫切れ'); l.active=false; bump(); save(); renderAll(); return; }
-      if(buyer.balance < l.price){ toast('残高不足'); return; }
-      const seller = findUserById(l.sellerId); if(!seller){ toast('販売者が不明'); return; }
-
-      const fee = Math.floor(l.price * 0.10);
-      const sellerReceive = l.price - fee;
-      const j = jackpotUser(); if(!j){ toast('JPOTユーザーが見つかりません'); return; }
-
-      buyer.balance -= l.price; seller.balance += sellerReceive; j.balance += fee;
-
-      const right = { id:id(), listingId: l.id, title: l.title, buyerId: buyer.id, sellerId: seller.id, ts: Date.now(), status:'owned', executed:false };
-      state.rights.unshift(right);
-
-      l.sold = (l.sold||0) + 1;
-      if(l.sold >= l.qty){ l.active = false; }
-
-      addTx({ type:'purchase', from: buyer.id, to: seller.id, amount: l.price, listingId:l.id, title:l.title, memo:`権利購入（手数料10%）` });
-      addTx({ type:'fee', from: seller.id, to: j.id, amount: fee, listingId:l.id, title:l.title, memo:'販売手数料' });
-
-      bump(); save(); renderAll(); toast(`購入：${l.title}（残り在庫 ${l.qty - l.sold}）`);
-    }
-
-    function deleteListing(listingId){
-      const me = currentUser(); if(!me){ toast('ログインが必要です'); return; }
-      const idx = state.listings.findIndex(x=>x.id===listingId);
-      if(idx<0){ toast('出品が見つかりません'); return; }
-      const l = state.listings[idx];
-      if(l.sellerId !== me.id){ toast('自分の出品のみ削除可能'); return; }
-      if((l.sold||0) > 0){ toast('購入履歴があるため削除できません'); return; }
-      if(!confirm('この出品を完全に削除しますか？')) return;
-      state.listings.splice(idx,1);
-      bump(); save(); renderAll(); toast('出品を削除しました');
-    }
-
-    function toggleListingActive(listingId){
-      const me = currentUser(); if(!me){ toast('ログインが必要です'); return; }
-      const l = state.listings.find(x=>x.id===listingId);
-      if(!l){ toast('出品が見つかりません'); return; }
-      if(l.sellerId !== me.id){ toast('自分の出品のみ操作可能'); return; }
-      l.active = !l.active; bump(); save(); renderAll(); toast(l.active?'出品を公開しました':'出品を停止しました');
-    }
-
-    function buyerRequest(rightId){
-      const me=currentUser(); if(!me){ toast('ログインが必要'); return; }
-      const r = state.rights.find(x=>x.id===rightId); if(!r) return;
-      if(r.buyerId!==me.id){ toast('自分の権利ではありません'); return; }
-      if(r.status!=='owned'){ toast('この権利は申請済みです'); return; }
-      r.status='request';
-      addTx({type:'execute-request', from:r.buyerId, to:r.sellerId, listingId:r.listingId, title:r.title, memo:'実行申請'});
-      bump(); save(); renderAll(); toast('実行を申請しました（販売者に通知）');
-    }
-
-    function buyerReturn(rightId){
-      const me=currentUser(); if(!me){ toast('ログインが必要'); return; }
-      const r = state.rights.find(x=>x.id===rightId); if(!r) return;
-      if(r.buyerId!==me.id || r.status!=='owned'){ toast('保有中の自分の権利のみ返品可能'); return; }
-      const l = state.listings.find(x=>x.id===r.listingId); if(!l){ toast('出品情報が見つかりません'); return; }
-      const seller = findUserById(r.sellerId); if(!seller){ toast('販売者が見つかりません'); return; }
-      const refund = Math.floor(l.price * 0.90);
-      if(seller.balance < refund){ toast('販売者の残高が不足しています（返品不可）'); return; }
-
-      seller.balance -= refund;
-      const buyer = findUserById(r.buyerId); buyer.balance += refund;
-      l.sold = Math.max(0, (l.sold||0)-1);
-      if(l.sold < l.qty){ l.active = true; }
-      state.rights = state.rights.filter(x=>x.id!==rightId);
-
-      addTx({type:'return', from:seller.id, to:buyer.id, listingId:l.id, title:r.title, amount:refund, memo:'購入者が返品（手数料は返らない）'});
-      bump(); save(); renderAll(); toast(`返品：${r.title}（返金 ${fmt.format(refund)} coin）`);
-    }
-
-    function sellerRespond(rightId, action){
-      const me=currentUser(); if(!me){ toast('ログインが必要'); return; }
-      const r = state.rights.find(x=>x.id===rightId); if(!r) return;
-      if(r.sellerId!==me.id){ toast('あなたは販売者ではありません'); return; }
-      if(r.status!=='request'){ toast('この権利は待機中ではありません'); return; }
-      const l = state.listings.find(x=>x.id===r.listingId); if(!l){ toast('出品情報が見つかりません'); return; }
-      if(action==='exec'){
-        r.status='seller_executed';
-        addTx({type:'execute-done', from:r.sellerId, to:r.buyerId, listingId:r.listingId, title:r.title, memo:'販売者が実行'});
-        bump(); save(); renderAll(); toast('実行を報告しました');
-      }else{
-        const seller = findUserById(r.sellerId);
-        if(seller.balance < l.price){ toast('残額が不足しています'); return; }
-        r.status='seller_cancel_requested';
-        addTx({type:'execute-cancel-ask', from:r.sellerId, to:r.buyerId, listingId:r.listingId, title:r.title, memo:'販売者がキャンセル申請'});
-        bump(); save(); renderAll(); toast('キャンセルを申請しました');
-      }
-    }
-
-    function buyerFinalize(rightId){
-      const me=currentUser(); if(!me){ toast('ログインが必要'); return; }
-      const r = state.rights.find(x=>x.id===rightId); if(!r) return;
-      if(r.buyerId!==me.id){ toast('あなたは購入者ではありません'); return; }
-      const l = state.listings.find(x=>x.id===r.listingId); if(!l){ toast('出品情報が見つかりません'); return; }
-      if(r.status==='seller_executed'){
-        r.status='finalized'; r.executed=true;
-        addTx({type:'execute-finalize', from:r.buyerId, to:r.sellerId, listingId:r.listingId, title:r.title, memo:'購入者が実行確認（確定）'});
-        bump(); save(); renderAll(); toast('実行を確定しました');
-      } else if(r.status==='seller_cancel_requested'){
-        const seller = findUserById(r.sellerId);
-        const buyer = findUserById(r.buyerId);
-        if(seller.balance < l.price){ toast('販売者の残高が不足しています（確定不可）'); return; }
-        seller.balance -= l.price; buyer.balance += l.price;
-        l.sold = Math.max(0, (l.sold||0)-1); if(l.sold < l.qty){ l.active = true; }
-        state.rights = state.rights.filter(x=>x.id!==rightId);
-        addTx({type:'execute-cancel-ok', from:r.buyerId, to:r.sellerId, listingId:r.listingId, title:r.title, amount:l.price, memo:'キャンセル返金（全額）確定'});
-        bump(); save(); renderAll(); toast('キャンセル（全額返金）を確定しました');
-      } else { toast('確定可能な状態ではありません'); }
-    }
-
-    const MORNING_HOUR = 7, MORNING_MINUTE = 30, MORNING_BASE = 1000, STREAK_MAX = 30, STREAK_INC = 100;
-    function todayKey(){ const d = new Date(); const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
-    function beforeDeadline(){ const n=new Date(); if(n.getHours()<MORNING_HOUR) return true; if(n.getHours()>MORNING_HOUR) return false; return n.getMinutes()<=MORNING_MINUTE; }
-    function canClaimMorning(){
-      const me=currentUser(); if(!me) return {ok:false,reason:'ログインしてください'};
-      if(isJackpot(me)) return {ok:false,reason:'ジャックポットは朝活対象外'};
-      const t=todayKey(); if(me.lastMorningDate===t) return {ok:false,reason:'本日は受取済み'};
-      if(!beforeDeadline()) return {ok:false,reason:'7:30を過ぎています'}; return {ok:true};
-    }
-    function updateMorningButton(){
-      const me=currentUser();
-      const s=canClaimMorning(); els.morningBtn.disabled=!s.ok; els.morningBtn.title = s.ok? `朝活：7:30まで / 連続 +${STREAK_INC}（上限${STREAK_MAX}）` : s.reason;
-      const cnt = me ? (me.streakCount||0) : 0;
-      els.streakBadge.textContent = `🔥${cnt}`;
-    }
-    function morningClaim(){
-      const me=currentUser(); const c=canClaimMorning();
-      if(!c.ok){ toast(c.reason); updateMorningButton(); return; }
-      const today = todayKey();
-      if(me.lastMorningDate){
-        const diff = Math.round((new Date(today) - new Date(me.lastMorningDate))/86400000);
-        me.streakCount = (diff===1) ? Math.min((me.streakCount||0)+1, STREAK_MAX) : 1;
-      } else { me.streakCount = 1; }
-      me.lastMorningDate = today;
-      const bonus = MORNING_BASE + STREAK_INC * (me.streakCount||0);
-      me.balance += bonus;
-      addTx({ type:'mint', to: me.id, amount: bonus, memo:`朝活（連続${me.streakCount}日）` });
-      bump(); save(); renderAll(); toast(`朝活 +${fmt.format(bonus)} coin（連続${me.streakCount}日）`);
-    }
-
-    function renderJackpot(){
-      const j = jackpotUser();
-      const bal = j? j.balance : 0;
-      els.jackpotChip.textContent = `現在: ${fmt.format(bal)} coin`;
-      els.jackpotBadge.textContent = `JPOT: ${fmt.format(bal)}`;
-      const me=currentUser();
-      els.rouletteBtn.disabled = !me || (me && me.balance < 100) || bal<=0 || (me && isJackpot(me));
-    }
-    function rouletteSpin(){
-      const me=currentUser(); if(!me){ toast('ログインが必要です'); return; }
-      if(isJackpot(me)){ toast('ジャックポットでは遊べません'); return; }
-      if(me.balance < 100){ toast('残高が不足しています（100 coin必要）'); return; }
-      const j = jackpotUser(); if(!j){ toast('JPOTユーザーが見つかりません'); return; }
-      if(j.balance <= 0){ toast('ジャックポットが空です'); return; }
-
-      me.balance -= 100; j.balance += 100;
-      addTx({ type:'jpot-fee', from: me.id, to: j.id, amount: 100, memo:'ルーレット参加費' });
-
-      const roll = Math.random();
-      if(roll < 0.01){
-        const payout = j.balance;
-        if(payout > 0){
-          me.balance += payout;
-          addTx({ type:'jackpot', from: j.id, to: me.id, amount: payout, memo:'🎉 ジャックポット当選（ルーレット）' });
-          j.balance = 0;
-          els.rouletteResult.textContent = `結果: JACKPOT!! +${fmt.format(payout)} coin`;
-        } else { els.rouletteResult.textContent = `結果: JACKPOT発生もプール0`; }
-        bump(); save(); renderAll(); return;
-      }
-      const prizes = [{p:0.40, v:0},{p:0.25, v:50},{p:0.18, v:100},{p:0.09, v:150},{p:0.05, v:200},{p:0.02, v:400},{p:0.0099, v:700}];
-      let r = Math.random(), acc=0, val=0;
-      for(const it of prizes){ acc += it.p; if(r < acc){ val = it.v; break; } }
-      const payout = Math.min(j.balance, val);
-      if(payout>0){ me.balance += payout; j.balance -= payout; addTx({ type:'roulette', from: j.id, to: me.id, amount: payout, memo:'ルーレット払い出し' }); }
-      els.rouletteResult.textContent = `結果: +${fmt.format(payout)} coin`;
-      bump(); save(); renderAll();
-    }
-
-    function renderSummary(){
-      els.kpiMembers.textContent = state.users.filter(u=>!isJackpot(u)).length;
-      const sumBalances = state.users.reduce((s,u)=>s+(u.balance||0),0);
-      els.kpiSupply.textContent = coins(sumBalances);
-      const last = state.txs[0];
-      els.lastActivity.textContent = last ? `最終更新：${ts2str(last.ts)}` : '最終更新：—';
-    }
-
-    function renderWallets(){
-      els.walletList.innerHTML = '';
-      const frag = document.createDocumentFragment();
-      state.users.forEach(u => {
-        const row = document.createElement('div'); row.className = 'wallet';
-        const name = document.createElement('div'); name.className = 'name'; name.textContent = u.name + (u.id===state.currentUserId?'（自分）':'');
-        const bal = document.createElement('div'); bal.className = 'balance'; bal.textContent = coins(u.balance);
-        row.appendChild(name); row.appendChild(bal); frag.appendChild(row);
-      });
-      els.walletList.appendChild(frag);
-    }
-
-    function renderHeaderUser(){
-      const me = currentUser();
-      els.userBadge.textContent = me ? `${me.name} / ${coins(me.balance)}` : '未ログイン';
-      els.fromFixed.value = me ? `${me.name}（残高：${fmt.format(me.balance)}）` : '未ログイン';
-      if(me && isJackpot(me) && state.lastRealUserId){
-        const actor = findUserById(state.lastRealUserId);
-        els.actingBadge.style.display = actor? 'inline-block':'none';
-        els.actingBadge.textContent = actor? `acting: ${actor.name}` : 'acting: —';
-      } else { els.actingBadge.style.display = 'none'; }
-      updateMorningButton();
-      renderJackpot();
-      renderApprovalBanner();
-      renderRightRequestBanner();
-    }
-
-    function renderSelects(){
-      const me = currentUser();
-      let list = state.users.filter(u=>!me || u.id!==me.id);
-      if(me && !isJackpot(me)) list = list.filter(u=>!isJackpot(u));
-      const opts = list.map(u => `<option value="${u.id}">${escapeHtml(u.name)}（${fmt.format(u.balance)}）</option>`).join('');
-      els.toSelect.innerHTML = `<option value="">選択</option>${opts}`;
-      els.memberFilter.innerHTML = `<option value="">すべて</option>` + state.users.map(u=>`<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
-    }
-
-    function renderHistory(){
-      const q = (els.searchInput.value||'').toLowerCase();
-      const f = els.memberFilter.value||'';
-      els.historyBody.innerHTML = '';
-      const frag = document.createDocumentFragment();
-      state.txs
-        .filter(t => {
-          if(f && !((t.from&&t.from===f) || (t.to&&t.to===f) || (t.actedBy&&t.actedBy===f))) return false;
-          if(!q) return true;
-          const fromName = nameOf(t.from);
-          const toName = nameOf(t.to);
-          const actorName = nameOf(t.actedBy);
-          const text = `${fromName} ${toName} ${actorName} ${(t.memo||'')} ${(t.title||'')}`.toLowerCase();
-          return text.includes(q);
-        })
-        .forEach(t => frag.appendChild(trHistory(t)));
-      els.historyBody.appendChild(frag);
-    }
-
-    function trHistory(t){
-      const tr = document.createElement('tr');
-      const tdTime = document.createElement('td'); tdTime.textContent = ts2str(t.ts);
-      const tdType = document.createElement('td'); tdType.textContent = typeLabel(t.type);
-      const tdFrom = document.createElement('td'); tdFrom.innerHTML = pill(nameOf(t.from)||'—');
-      const tdTo = document.createElement('td'); tdTo.innerHTML = pill(nameOf(t.to)||'—');
-      const suffix = t.actedBy ? ` / actedBy:${nameOf(t.actedBy)}` : '';
-      const tdMemo = document.createElement('td'); tdMemo.className='memo'; tdMemo.textContent = t.title ? `${t.title}${t.memo?` / ${t.memo}`:''}${suffix}` : ((t.memo||'')+suffix);
-      const tdAmt = document.createElement('td'); tdAmt.style.textAlign = 'right'; tdAmt.innerHTML = t.amount? `<span class="amount">${fmt.format(t.amount)}</span>` : '';
-      tr.append(tdTime, tdType, tdFrom, tdTo, tdMemo, tdAmt);
-      return tr;
-    }
-
-    function typeLabel(tp){
-      return tp==='transfer'?'送金'
-        : tp==='purchase'?'購入'
-        : tp==='execute-request'?'実行申請'
-        : tp==='execute-done'?'実行（販売者）'
-        : tp==='execute-finalize'?'実行確定（購入者）'
-        : tp==='execute-cancel-ask'?'キャンセル申請（販売者）'
-        : tp==='execute-cancel-ok'?'キャンセル確定（購入者）'
-        : tp==='return'?'返品'
-        : tp==='mint'?'発行'
-        : tp==='burn'?'焼却'
-        : tp==='fee'?'手数料'
-        : tp==='roulette'?'ルーレット'
-        : tp==='jackpot'?'ジャックポット'
-        : tp==='jpot-fee'?'JPOT入金'
-        : '—';
-    }
-
-    function renderListings(){
-      els.listingBody.innerHTML='';
-      const me = currentUser();
-      state.listings.forEach(l=>{
-        const remaining = (l.qty||1)-(l.sold||0);
-        const tr = document.createElement('tr');
-        const tdT = document.createElement('td'); tdT.textContent = l.title + (l.active?'':'（停止中）');
-        const tdP = document.createElement('td'); tdP.innerHTML = `<span class="amount">${fmt.format(l.price)}</span>`;
-        const tdQ = document.createElement('td'); tdQ.textContent = `${remaining}/${l.qty}`;
-        const tdS = document.createElement('td'); tdS.textContent = nameOf(l.sellerId);
-        const tdD = document.createElement('td'); tdD.textContent = l.desc||'';
-        const tdA = document.createElement('td');
-        if(me){
-          if(l.sellerId === me.id){
-            const tog = document.createElement('button'); tog.className='btn secondary'; tog.textContent = l.active?'停止':'公開'; tog.onclick = ()=>toggleListingActive(l.id);
-            const del = document.createElement('button'); del.className='btn danger'; del.textContent='削除'; del.disabled = (l.sold||0)>0; del.onclick = ()=>deleteListing(l.id);
-            tdA.appendChild(tog); tdA.appendChild(document.createTextNode(' ')); tdA.appendChild(del);
-          } else {
-            const buy = document.createElement('button'); buy.className='btn'; buy.textContent='購入';
-            buy.disabled = !l.active || remaining<=0 || isJackpot(me);
-            buy.onclick=()=>{ buy.disabled=true; buyListing(l.id); };
-            tdA.appendChild(buy);
-          }
-        } else {
-          const s = document.createElement('span'); s.className='chip'; s.textContent='ログインしてください'; tdA.appendChild(s);
-        }
-        tr.append(tdT, tdP, tdQ, tdS, tdD, tdA);
-        els.listingBody.appendChild(tr);
-      });
-    }
-
-    function renderRights(){
-      els.rightsBody.innerHTML='';
-      const me = currentUser(); if(!me) return;
-      const my = state.rights.filter(r=>r.buyerId===me.id);
-      my.forEach(r=>{
-        const tr = document.createElement('tr');
-        const tdTs = document.createElement('td'); tdTs.textContent = ts2str(r.ts);
-        const tdT = document.createElement('td'); tdT.textContent = r.title;
-        const tdS = document.createElement('td'); tdS.textContent = nameOf(r.sellerId);
-        const tdSt = document.createElement('td'); tdSt.textContent = statusLabel(r);
-        const tdA = document.createElement('td'); tdA.appendChild(rightActionButtons(r));
-        tr.append(tdTs, tdT, tdS, tdSt, tdA);
-        els.rightsBody.appendChild(tr);
-      });
-    }
-
-    function statusLabel(r){
-      return r.status==='owned'?'保有中'
-        : r.status==='request'?'販売者の対応待ち'
-        : r.status==='seller_executed'?'販売者が実行済（確認待ち）'
-        : r.status==='seller_cancel_requested'?'販売者がキャンセル申請（確認待ち）'
-        : r.status==='finalized'? (r.executed?'確定（実行済）':'確定（キャンセル）')
-        : '—';
-    }
-
-    function rightActionButtons(r){
-      const span = document.createElement('span');
-      if(r.status==='owned'){
-        const btn = document.createElement('button'); btn.className='btn warn'; btn.textContent='実行を申請'; btn.onclick=()=>{ btn.disabled=true; buyerRequest(r.id); };
-        const ret = document.createElement('button'); ret.className='btn danger'; ret.textContent='返品'; ret.onclick=()=>{ ret.disabled=true; buyerReturn(r.id); };
-        span.appendChild(btn); span.appendChild(document.createTextNode(' ')); span.appendChild(ret);
-      } else if(r.status==='seller_executed'){
-        const btn = document.createElement('button'); btn.className='btn'; btn.textContent='済（確定）'; btn.onclick=()=>{ btn.disabled=true; buyerFinalize(r.id); };
-        span.appendChild(btn);
-      } else if(r.status==='seller_cancel_requested'){
-        const btn = document.createElement('button'); btn.className='btn secondary'; btn.textContent='キャンセル承認（確定）'; btn.onclick=()=>{ btn.disabled=true; buyerFinalize(r.id); };
-        span.appendChild(btn);
-      } else {
-        const chip = document.createElement('span'); chip.className='chip'; chip.textContent='操作なし'; span.appendChild(chip);
-      }
-      return span;
-    }
-
-    function switchMarketSub(which){
-      els.subtabs.forEach(s=> s.classList.toggle('active', s.dataset.sub===which));
-      els.marketSell.style.display = which==='sell' ? 'block' : 'none';
-      els.marketList.style.display = which==='list' ? 'block' : 'none';
-    }
-
-    function renderApprovalBanner(forceGray){
-      if(!state.approval.active){ els.approvalBanner.style.display='none'; return; }
-      const to=findUserById(state.approval.toId);
-      const amt=state.approval.amount||0;
-      els.approvalText.textContent = `ジャックポットが ${to?to.name:'?'} に ${fmt.format(amt)} coin を送金しようとしています` + (state.approval.memo? `（${state.approval.memo}）` : '');
-      const me=currentUser();
-      if(me && !isJackpot(me)){
-        const voted = state.approval.votes && state.approval.votes[me.id];
-        els.btnApprove.disabled = !!voted || !!forceGray;
-        els.btnReject.disabled = !!voted || !!forceGray;
-        els.approvalActions.style.display='flex';
-      } else if(me && isJackpot(me)){
-        els.btnApprove.disabled = true;
-        els.btnReject.textContent = 'キャンセル';
-        els.btnReject.disabled = false;
-        els.approvalActions.style.display='flex';
-      } else { els.approvalActions.style.display='none'; }
-      els.approvalBanner.style.display='flex';
-    }
-
-    function renderRightRequestBanner(){
-      const me=currentUser(); if(!me){ els.rightReqBanner.style.display='none'; return; }
-      const pending = state.rights.filter(r=>r.sellerId===me.id && r.status==='request').sort((a,b)=>b.ts-a.ts)[0];
-      if(!pending){ els.rightReqBanner.style.display='none'; return; }
-      const buyer = findUserById(pending.buyerId);
-      els.rightReqText.textContent = `権利実行リクエスト：${buyer?buyer.name:'?'} が「${pending.title}」の実行を申請しています`;
-      els.btnRightExec.onclick = ()=>{ els.btnRightExec.disabled=true; els.btnRightCancel.disabled=true; sellerRespond(pending.id,'exec'); };
-      els.btnRightCancel.onclick = ()=>{ els.btnRightExec.disabled=true; els.btnRightCancel.disabled=true; sellerRespond(pending.id,'cancel'); };
-      els.rightReqBanner.style.display='flex';
-    }
-
-    function renderTabs(){
-      const show = (name)=>{
-        els.tabTransfer.style.display = name==='transfer'? 'block':'none';
-        els.tabMarket.style.display   = name==='market'  ? 'block':'none';
-        els.tabMyRights.style.display = name==='myrights'? 'block':'none';
-        els.tabGamble.style.display   = name==='gamble'  ? 'block':'none';
-      }
-      const active = document.querySelector('.tabbar .tab.active');
-      show(active? active.dataset.tab : 'transfer');
-    }
-
-    function renderAll(){ renderSummary(); renderWallets(); renderHeaderUser(); renderSelects(); renderHistory(); renderListings(); renderRights(); renderTabs(); }
-
-    let syncTimer = null;
-    function syncDebounced(){ if(!sync.connected) return; if(syncTimer) clearTimeout(syncTimer); syncTimer = setTimeout(()=>{ sync.broadcastState(); }, 180); }
-
-    els.registerBtn.addEventListener('click', ()=> register(els.regName.value, els.regPass.value));
-    els.loginBtn.addEventListener('click', ()=> login(els.loginName.value, els.loginPass.value));
-    els.logoutBtn.addEventListener('click', logout);
-    els.sendBtn.addEventListener('click', ()=>{ transfer(els.toSelect.value, els.amountInput.value, els.memoInput.value); els.amountInput.value=''; els.memoInput.value=''; });
-    els.searchInput.addEventListener('input', renderHistory);
-    els.memberFilter.addEventListener('change', renderHistory);
-    els.exportBtn.addEventListener('click', exportJSON);
-    els.importFile.addEventListener('change', (e)=>{ const f=e.target.files[0]; if(f) importJSON(f); e.target.value=''; });
-    els.createListingBtn.addEventListener('click', ()=> createListing(els.listTitle.value, els.listPrice.value, els.listDesc.value));
-    els.tabs.forEach(t=> t.addEventListener('click', ()=>{ document.querySelectorAll('.tabbar .tab').forEach(x=>x.classList.remove('active')); t.addEventListener('animationend',()=>{}, {once:true}); t.classList.add('active'); renderTabs(); }));
-    els.subtabs.forEach(s=> s.addEventListener('click', ()=> switchMarketSub(s.dataset.sub)));
-    els.morningBtn.addEventListener('click', morningClaim);
-    els.rouletteBtn.addEventListener('click', rouletteSpin);
-    els.btnApprove.addEventListener('click', ()=> approve(true));
-    els.btnReject.addEventListener('click', ()=>{ const me=currentUser(); if(me && isJackpot(me)){ cancelApproval(); } else { approve(false); } });
-    els.btnConnect.addEventListener('click', ()=> sync.connect());
-    els.btnDisconnect.addEventListener('click', ()=> sync.disconnect());
-    els.btnBroadcast.addEventListener('click', ()=> sync.broadcastState());
-
-    load(); ensureJackpotUser();
-    state.listings.forEach(l=>{ if(typeof l.qty!=='number') l.qty=1; if(typeof l.sold!=='number') l.sold=0; });
-    state.rights.forEach(r=>{ if(!r.status){ r.status = r.executed? 'finalized':'owned'; } });
-    if(typeof state.jackpot === 'number'){ jackpotUser().balance += state.jackpot; delete state.jackpot; }
-    state.txs.forEach(t=>{ if(t.to==='_jackpot'){ t.to = state.jackpotUserId; } if(t.from==='_jackpot'){ t.from = state.jackpotUserId; } });
-    state.users.forEach(u=>{ if(typeof u.streakCount!=='number') u.streakCount=0; if(typeof u.lastMorningDate!=='string') u.lastMorningDate=''; });
-
-    sync.loadSettings();
-    save(true); renderAll();
-    setInterval(()=>{ try{ updateMorningButton(); renderApprovalBanner(); renderRightRequestBanner(); }catch(e){} }, 30000);
-
-    if(state.users.filter(u=>!isJackpot(u)).length===0){ toast(`まずは新規登録してください（初期残高は 10,000 coin） / ${JACKPOT_NAME} はパス不要で誰でもログイン可`); }
-  })();
-  </script>
+    <div class="panel">
+      <label>新規登録（初期 10,000 coin）</label>
+      <input id="regName" type="text" placeholder="ユーザー名"/><input id="regPass" type="password" placeholder="パスワード"/><button class="btn" id="registerBtn">登録</button>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:8px"><label>ウォレット一覧</label><div id="walletList" style="display:grid;gap:6px"></div></div>
+</div></section>
+<section class="card"><div class="hd"><h3>操作</h3><div class="tabbar"><div class="tab active" data-tab="transfer">送金</div><div class="tab" data-tab="market">マーケット</div><div class="tab" data-tab="myrights">自分の権利</div><div class="tab" data-tab="gamble">ギャンブル</div></div></div>
+<div class="bd">
+<div id="tab-transfer">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div class="panel"><label>送信元（あなた）</label><input id="fromFixed" type="text" disabled placeholder="未ログイン"/></div>
+    <div class="panel"><label>送信先</label><select id="toSelect"></select></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 140px;gap:10px;margin-top:8px">
+    <div class="panel"><label>金額（coin）</label><input id="amountInput" type="number" min="1" step="1" placeholder="例）250"/></div>
+    <div class="panel"><label>&nbsp;</label><button class="btn" id="sendBtn">送信する</button></div>
+  </div>
+  <div class="panel" style="margin-top:8px"><label>メモ（任意）</label><input id="memoInput" type="text" placeholder="例）ギルド賞金"/></div>
+</div>
+<div id="tab-market" style="display:none">
+  <div class="tabbar" style="margin-bottom:6px"><div class="tab active" data-sub="sell">出品する</div><div class="tab" data-sub="list">出品一覧</div></div>
+  <div id="market-sell" class="panel">
+    <label>権利の出品</label><input id="listTitle" type="text" placeholder="例）ゲームを一緒に遊ぶ"/><textarea id="listDesc" rows="2" placeholder="説明（任意）"></textarea>
+    <div style="display:grid;grid-template-columns:1fr 1fr 140px;gap:8px">
+      <div><label>価格</label><input id="listPrice" type="number" min="1" step="1"/></div>
+      <div><label>在庫</label><input id="listQty" type="number" min="1" step="1"/></div>
+      <div style="display:flex;align-items:end"><button class="btn" id="createListingBtn">出品する</button></div>
+    </div>
+  </div>
+  <div id="market-list" style="display:none">
+    <div class="table"><table><thead><tr><th>タイトル</th><th>価格</th><th>在庫</th><th>出品者</th><th>説明</th><th>操作</th></tr></thead><tbody id="listingBody"></tbody></table></div>
+  </div>
+</div>
+<div id="tab-myrights" style="display:none">
+  <div class="table"><table><thead><tr><th>日付</th><th>タイトル</th><th>販売者</th><th>状態</th><th>操作</th></tr></thead><tbody id="rightsBody"></tbody></table></div>
+</div>
+<div id="tab-gamble" style="display:none">
+  <div class="panel"><label>TRPGジャックポット</label><div class="tabbar"><div class="chip" id="jackpotChip">現在: 0 coin</div></div></div>
+  <div class="panel"><h4 style="margin:0">🎰 ルーレット（1回100 coin）</h4><p style="margin:0;color:#94a3b8;font-size:12px">期待値約70%。1%で全額ジャックポット。</p><div class="tabbar"><button class="btn" id="rouletteBtn">回す</button></div><div id="rouletteResult" class="chip" style="margin-top:8px">結果: —</div></div>
+</div>
+<div class="toast" id="toast"></div>
+</div></section>
+<section class="card"><div class="hd"><h3>履歴</h3><div class="tabbar"><input id="searchInput" type="text" placeholder="検索：名前 / メモ / 権利" style="width:200px"/><select id="memberFilter"><option value="">すべて</option></select><div id="lastActivity" class="chip">最終更新：—</div></div></div>
+<div class="bd"><div class="table"><table><thead><tr><th>日付</th><th>種別</th><th>送信元/販売者</th><th>送信先/購入者</th><th>メモ/権利</th><th style="text-align:right">金額</th></tr></thead><tbody id="historyBody"></tbody></table></div></div></section>
+</div></main>
+<script>
+(function(){
+const LS_KEY='trpg_token_state_v14_kv', INITIAL_BAL=10000, JACKPOT_NAME='ジャックポット';
+let state={users:[],txs:[],listings:[],rights:[],currentUserId:null,jackpotUserId:'',lastRealUserId:null,approval:{active:false,votes:{}},version:14,vTick:0};
+const els={kpiMembers:document.getElementById('kpiMembers'),kpiSupply:document.getElementById('kpiSupply'),walletList:document.getElementById('walletList'),toSelect:document.getElementById('toSelect'),sendBtn:document.getElementById('sendBtn'),amountInput:document.getElementById('amountInput'),memoInput:document.getElementById('memoInput'),historyBody:document.getElementById('historyBody'),searchInput:document.getElementById('searchInput'),memberFilter:document.getElementById('memberFilter'),exportBtn:document.getElementById('exportBtn'),importFile:document.getElementById('importFile'),lastActivity:document.getElementById('lastActivity'),userBadge:document.getElementById('userBadge'),fromFixed:document.getElementById('fromFixed'),streakBadge:document.getElementById('streakBadge'),jackpotBadge:document.getElementById('jackpotBadge'),morningBtn:document.getElementById('morningBtn'),loginName:document.getElementById('loginName'),loginPass:document.getElementById('loginPass'),loginBtn:document.getElementById('loginBtn'),logoutBtn:document.getElementById('logoutBtn'),regName:document.getElementById('regName'),regPass:document.getElementById('regPass'),registerBtn:document.getElementById('registerBtn'),tabs:Array.from(document.querySelectorAll('.tabbar .tab')),tabTransfer:document.getElementById('tab-transfer'),tabMarket:document.getElementById('tab-market'),tabMyRights:document.getElementById('tab-myrights'),tabGamble:document.getElementById('tab-gamble'),listTitle:document.getElementById('listTitle'),listDesc:document.getElementById('listDesc'),listPrice:document.getElementById('listPrice'),listQty:document.getElementById('listQty'),createListingBtn:document.getElementById('createListingBtn'),listingBody:document.getElementById('listingBody'),rightsBody:document.getElementById('rightsBody'),subtabs:Array.from(document.querySelectorAll('#tab-market .tab')),marketSell:document.getElementById('market-sell'),marketList:document.getElementById('market-list'),jackpotChip:document.getElementById('jackpotChip'),rouletteBtn:document.getElementById('rouletteBtn'),rouletteResult:document.getElementById('rouletteResult'),syncUrl:document.getElementById('syncUrl'),syncRoom:document.getElementById('syncRoom'),syncKey:document.getElementById('syncKey'),btnConnect:document.getElementById('btnConnect'),btnSyncNow:document.getElementById('btnSyncNow'),syncStatus:document.getElementById('syncStatus'),lastSyncChip:document.getElementById('lastSyncChip')};
+const fmt=new Intl.NumberFormat('ja-JP'); const coins=n=>fmt.format(n)+' coin'; const ts2str=ts=>{const d=new Date(ts);const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}; const id=()=>Math.random().toString(36).slice(2)+Date.now().toString(36);
+function toast(msg){const t=document.getElementById('toast');const div=document.createElement('div');div.className='chip';div.textContent=msg;t.appendChild(div);setTimeout(()=>div.remove(),2500);}
+function saveLocal(skipPush){localStorage.setItem(LS_KEY,JSON.stringify(state)); if(!skipPush) schedulePush();}
+function loadLocal(){try{const raw=localStorage.getItem(LS_KEY);if(raw){state=JSON.parse(raw)}}catch(e){} if(typeof state.vTick!=='number') state.vTick=0;}
+const syncStoreKey='trpg_sync_kv'; let syncSettings={url:'',room:'',key:''}; function loadSyncSettings(){try{const s=JSON.parse(localStorage.getItem(syncStoreKey)||'{}'); syncSettings=Object.assign({url:'',room:'',key:''},s);}catch{} els.syncUrl.value=syncSettings.url; els.syncRoom.value=syncSettings.room; els.syncKey.value=syncSettings.key;} function saveSyncSettings(){syncSettings={url:els.syncUrl.value.trim(),room:els.syncRoom.value.trim(),key:els.syncKey.value.trim()}; localStorage.setItem(syncStoreKey,JSON.stringify(syncSettings));}
+let pollTimer=null, pushTimer=null; function startPolling(){stopPolling(); els.syncStatus.textContent='同期中'; kvFetchLatest(); pollTimer=setInterval(kvFetchLatest,1500);} function stopPolling(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;} els.syncStatus.textContent='停止中';}
+function schedulePush(){ if(pushTimer) clearTimeout(pushTimer); pushTimer=setTimeout(kvPushState,180); }
+async function kvFetchLatest(){ if(!syncSettings.url||!syncSettings.room||!syncSettings.key) return; try{const u=new URL(syncSettings.url); u.searchParams.set('room',syncSettings.room); u.searchParams.set('key',syncSettings.key); u.searchParams.set('vt',String(state.vTick||0)); const res=await fetch(u.toString(),{method:'GET',headers:{'accept':'application/json'}}); if(!res.ok) return; const data=await res.json(); if(data && data.state && data.state.vTick>(state.vTick||0)){ const keep=state.currentUserId; state=data.state; state.currentUserId=keep||null; saveLocal(true); renderAll(); els.lastSyncChip.textContent='最終同期：受信 '+new Date().toLocaleTimeString(); }}catch(e){} }
+async function kvPushState(){ if(!syncSettings.url||!syncSettings.room||!syncSettings.key) return; try{const u=new URL(syncSettings.url); u.searchParams.set('room',syncSettings.room); u.searchParams.set('key',syncSettings.key); const payload=JSON.stringify({vTick:state.vTick, state:Object.assign({},state,{currentUserId:null})}); const res=await fetch(u.toString(),{method:'PUT',headers:{'content-type':'application/json'},body:payload}); if(res.ok){ els.lastSyncChip.textContent='最終同期：送信 '+new Date().toLocaleTimeString(); }}catch(e){} }
+async function sha256(text){const enc=new TextEncoder().encode(text);const buf=await crypto.subtle.digest('SHA-256',enc);return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');}
+function findUserById(uid){return state.users.find(u=>u.id===uid)||null;} function findUserByName(name){return state.users.find(u=>u.name===name)||null;} function jackpotUser(){return findUserById(state.jackpotUserId);} function isJackpot(u){return u&&u.id===state.jackpotUserId;} function nameOf(uid){const u=findUserById(uid);return u?u.name:'';} function ensureJackpotUser(){let j=findUserByName(JACKPOT_NAME); if(!j){j={id:id(),name:JACKPOT_NAME,passHash:'',balance:0,streakCount:0,lastMorningDate:''}; state.users.unshift(j);} state.jackpotUserId=j.id;}
+function addTx(obj){const base={id:id(),ts:Date.now()}; state.txs.unshift(Object.assign(base,obj));} function bump(){state.vTick=(state.vTick||0)+1;}
+async function register(name,pass){name=(name||'').trim(); if(!name||!pass){toast('ユーザー名とパスワードを入力');return;} if(name===JACKPOT_NAME){toast('この名前は予約されています');return;} if(state.users.some(u=>u.name===name)){toast('そのユーザー名は使用済み');return;} const passHash=await sha256(pass); const u={id:id(),name,passHash,balance:INITIAL_BAL,streakCount:0,lastMorningDate:''}; state.users.push(u); state.currentUserId=u.id; state.lastRealUserId=u.id; addTx({type:'mint',to:u.id,amount:INITIAL_BAL,memo:'初期発行'}); bump(); saveLocal(); renderAll(); toast('登録完了');}
+async function login(name,pass){name=(name||'').trim(); const u=findUserByName(name); if(!u){toast('ユーザーが見つかりません');return;} if(isJackpot(u)){state.currentUserId=u.id;} else {const passHash=await sha256(pass||''); if(u.passHash!==passHash){toast('パスワードが違います');return;} state.currentUserId=u.id; state.lastRealUserId=u.id;} localStorage.setItem('last_current_uid',state.currentUserId||''); saveLocal(true); renderAll(); toast('ログイン');}
+function logout(){state.currentUserId=null; localStorage.setItem('last_current_uid',''); saveLocal(true); renderAll(); toast('ログアウト');}
+function currentUser(){return findUserById(state.currentUserId);}
+function transfer(toId,amount,memo){const from=currentUser(); if(!from){toast('ログインが必要');return;} amount=Math.floor(Number(amount)); if(!(amount>0)){toast('金額は1以上の整数');return;} const to=findUserById(toId); if(!to){toast('送信先が不正');return;} if(from.id===toId){toast('自分自身へは送れません');return;} if(isJackpot(to)){toast('ジャックポットへは直接送金できません');return;} if(from.balance<amount){toast('残高不足');return;} from.balance-=amount; to.balance+=amount; addTx({type:'transfer',from:from.id,to:to.id,amount, memo:(memo||'').trim()}); bump(); saveLocal(); renderAll();}
+function createListing(title,price,desc){const seller=currentUser(); if(!seller){toast('ログインが必要');return;} if(isJackpot(seller)){toast('JPOTでは出品不可');return;} title=(title||'').trim(); desc=(desc||'').trim(); price=Math.floor(Number(price)); let qty=Math.floor(Number(els.listQty.value||1)); if(!title||!(price>0)||!(qty>0)){toast('入力を確認');return;} const l={id:id(),title,price,desc,sellerId:seller.id,active:true,ts:Date.now(),qty,sold:0}; state.listings.unshift(l); bump(); saveLocal(); renderAll();}
+function buyListing(listingId){const buyer=currentUser(); if(!buyer){toast('ログインが必要');return;} const l=state.listings.find(x=>x.id===listingId && x.active); if(!l){toast('出品が見つかりません');return;} if(l.sellerId===buyer.id){toast('自分の出品は購入不可');return;} if(isJackpot(buyer)){toast('JPOTでは購入不可');return;} const remaining=(l.qty||1)-(l.sold||0); if(remaining<=0){toast('在庫切れ'); l.active=false; bump(); saveLocal(); renderAll(); return;} if(buyer.balance<l.price){toast('残高不足');return;} const seller=findUserById(l.sellerId); const j=jackpotUser(); const fee=Math.floor(l.price*0.10); const sellerReceive=l.price-fee; buyer.balance-=l.price; seller.balance+=sellerReceive; j.balance+=fee; const right={id:id(),listingId:l.id,title:l.title,buyerId:buyer.id,sellerId:seller.id,ts:Date.now(),status:'owned',executed:false}; state.rights.unshift(right); l.sold=(l.sold||0)+1; if(l.sold>=l.qty){l.active=false;} addTx({type:'purchase',from:buyer.id,to:seller.id,amount:l.price,listingId:l.id,title:l.title,memo:'権利購入（手数料10%）'}); addTx({type:'fee',from:seller.id,to:j.id,amount:fee,listingId:l.id,title:l.title,memo:'販売手数料'}); bump(); saveLocal(); renderAll();}
+function deleteListing(listingId){const me=currentUser(); if(!me){toast('ログインが必要');return;} const idx=state.listings.findIndex(x=>x.id===listingId); if(idx<0){toast('出品が見つかりません');return;} const l=state.listings[idx]; if(l.sellerId!==me.id){toast('自分の出品のみ削除可');return;} if((l.sold||0)>0){toast('購入履歴があるため削除不可');return;} state.listings.splice(idx,1); bump(); saveLocal(); renderAll();}
+function toggleListingActive(listingId){const me=currentUser(); if(!me){toast('ログインが必要');return;} const l=state.listings.find(x=>x.id===listingId); if(!l){toast('出品が見つかりません');return;} if(l.sellerId!==me.id){toast('自分の出品のみ');return;} l.active=!l.active; bump(); saveLocal(); renderAll();}
+function buyerReturn(rightId){const me=currentUser(); if(!me){toast('ログインが必要');return;} const r=state.rights.find(x=>x.id===rightId); if(!r) return; if(r.buyerId!==me.id || r.status!=='owned'){toast('保有中のみ返品可');return;} const l=state.listings.find(x=>x.id===r.listingId); const seller=findUserById(r.sellerId); const refund=Math.floor(l.price*0.90); if(seller.balance<refund){toast('販売者の残高不足');return;} seller.balance-=refund; const buyer=findUserById(r.buyerId); buyer.balance+=refund; l.sold=Math.max(0,(l.sold||0)-1); if(l.sold<l.qty){l.active=true;} state.rights=state.rights.filter(x=>x.id!==rightId); addTx({type:'return',from:seller.id,to:buyer.id,listingId:l.id,title:r.title,amount:refund,memo:'購入者が返品（手数料は返らない）'}); bump(); saveLocal(); renderAll();}
+function buyerRequest(rightId){const me=currentUser(); if(!me){toast('ログインが必要');return;} const r=state.rights.find(x=>x.id===rightId); if(!r) return; if(r.buyerId!==me.id||r.status!=='owned'){toast('申請できません');return;} r.status='request'; addTx({type:'execute-request',from:r.buyerId,to:r.sellerId,listingId:r.listingId,title:r.title,memo:'実行申請'}); bump(); saveLocal(); renderAll();}
+function sellerRespond(rightId,action){const me=currentUser(); if(!me){toast('ログインが必要');return;} const r=state.rights.find(x=>x.id===rightId); if(!r) return; if(r.sellerId!==me.id||r.status!=='request'){toast('対象外');return;} const l=state.listings.find(x=>x.id===r.listingId); if(action==='exec'){r.status='seller_executed'; addTx({type:'execute-done',from:r.sellerId,to:r.buyerId,listingId:r.listingId,title:r.title,memo:'販売者が実行'});} else {const seller=findUserById(r.sellerId); if(seller.balance<l.price){toast('残額不足');return;} r.status='seller_cancel_requested'; addTx({type:'execute-cancel-ask',from:r.sellerId,to:r.buyerId,listingId:r.listingId,title:r.title,memo:'販売者がキャンセル申請'});} bump(); saveLocal(); renderAll();}
+function buyerFinalize(rightId){const me=currentUser(); if(!me){toast('ログインが必要');return;} const r=state.rights.find(x=>x.id===rightId); if(!r) return; if(r.buyerId!==me.id){toast('あなたは購入者ではありません');return;} const l=state.listings.find(x=>x.id===r.listingId); if(r.status==='seller_executed'){r.status='finalized'; r.executed=true; addTx({type:'execute-finalize',from:r.buyerId,to:r.sellerId,listingId:r.listingId,title:r.title,memo:'購入者が実行確認（確定）'});} else if(r.status==='seller_cancel_requested'){const seller=findUserById(r.sellerId); const buyer=findUserById(r.buyerId); if(seller.balance<l.price){toast('販売者の残高不足');return;} seller.balance-=l.price; buyer.balance+=l.price; l.sold=Math.max(0,(l.sold||0)-1); if(l.sold<l.qty){l.active=true;} state.rights=state.rights.filter(x=>x.id!==rightId); addTx({type:'execute-cancel-ok',from:r.buyerId,to:r.sellerId,listingId:r.listingId,title:r.title,amount:l.price,memo:'キャンセル返金（全額）確定'});} else {toast('確定不可の状態');return;} bump(); saveLocal(); renderAll();}
+const MORNING_HOUR=7,MORNING_MINUTE=30,MORNING_BASE=1000,STREAK_MAX=30,STREAK_INC=100; function todayKey(){const d=new Date();const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`;} function beforeDeadline(){const n=new Date(); if(n.getHours()<MORNING_HOUR) return true; if(n.getHours()>MORNING_HOUR) return false; return n.getMinutes()<=MORNING_MINUTE;} function canClaimMorning(){const me=currentUser(); if(!me) return {ok:false,reason:'ログインしてください'}; if(isJackpot(me)) return {ok:false,reason:'ジャックポットは朝活対象外'}; const t=todayKey(); if(me.lastMorningDate===t) return {ok:false,reason:'本日は受取済み'}; if(!beforeDeadline()) return {ok:false,reason:'7:30を過ぎています'}; return {ok:true};}
+function updateMorningButton(){const me=currentUser(); const s=canClaimMorning(); els.morningBtn.disabled=!s.ok; const cnt=me?(me.streakCount||0):0; els.streakBadge.textContent='🔥'+cnt;}
+function morningClaim(){const me=currentUser(); const c=canClaimMorning(); if(!c.ok){toast(c.reason); updateMorningButton(); return;} const today=todayKey(); if(me.lastMorningDate){const diff=Math.round((new Date(today)-new Date(me.lastMorningDate))/86400000); me.streakCount=(diff===1)?Math.min((me.streakCount||0)+1,STREAK_MAX):1;} else {me.streakCount=1;} me.lastMorningDate=today; const bonus=MORNING_BASE+STREAK_INC*(me.streakCount||0); me.balance+=bonus; addTx({type:'mint',to:me.id,amount:bonus,memo:`朝活（連続${me.streakCount}日）`}); bump(); saveLocal(); renderAll();}
+function renderJackpot(){const j=jackpotUser(); const bal=j?j.balance:0; document.getElementById('jackpotChip').textContent='現在: '+fmt.format(bal)+' coin'; els.jackpotBadge.textContent='JPOT: '+fmt.format(bal); const me=currentUser(); els.rouletteBtn.disabled=!me || (me&&me.balance<100) || bal<=0 || (me&&isJackpot(me));}
+function rouletteSpin(){const me=currentUser(); if(!me){toast('ログインが必要');return;} if(isJackpot(me)){toast('ジャックポットでは遊べません');return;} if(me.balance<100){toast('残高不足');return;} const j=jackpotUser(); if(!j){toast('JPOTユーザーが見つかりません');return;} if(j.balance<=0){toast('ジャックポットが空です');return;} me.balance-=100; j.balance+=100; addTx({type:'jpot-fee',from:me.id,to:j.id,amount:100,memo:'ルーレット参加費'}); const roll=Math.random(); if(roll<0.01){const payout=j.balance; if(payout>0){me.balance+=payout; addTx({type:'jackpot',from:j.id,to:me.id,amount:payout,memo:'🎉 ジャックポット当選'}); j.balance=0; document.getElementById('rouletteResult').textContent='結果: JACKPOT!! +'+fmt.format(payout)+' coin';} else {document.getElementById('rouletteResult').textContent='結果: JACKPOT 0';} bump(); saveLocal(); renderAll(); return;} const prizes=[{p:0.40,v:0},{p:0.25,v:50},{p:0.18,v:100},{p:0.09,v:150},{p:0.05,v:200},{p:0.02,v:400},{p:0.0099,v:700}]; let r=Math.random(),acc=0,val=0; for(const it of prizes){acc+=it.p;if(r<acc){val=it.v;break;}} const payout=Math.min(j.balance,val); if(payout>0){me.balance+=payout;j.balance-=payout; addTx({type:'roulette',from:j.id,to:me.id,amount:payout,memo:'ルーレット払い出し'});} document.getElementById('rouletteResult').textContent='結果: +'+fmt.format(payout)+' coin'; bump(); saveLocal(); renderAll();}
+function renderSummary(){els.kpiMembers.textContent=state.users.filter(u=>!isJackpot(u)).length; els.kpiSupply.textContent=coins(state.users.reduce((s,u)=>s+(u.balance||0),0)); const last=state.txs[0]; els.lastActivity.textContent=last?'最終更新：'+ts2str(last.ts):'最終更新：—';}
+function renderWallets(){const list=els.walletList; list.innerHTML=''; state.users.forEach(u=>{const row=document.createElement('div'); row.style.cssText='padding:8px 10px;border:1px solid #60efff22;border-radius:10px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;background:#0e1836'; row.innerHTML='<div style="font-weight:750">'+u.name+(u.id===state.currentUserId?'（自分）':'')+'</div><div class="pill">'+coins(u.balance)+'</div>'; list.appendChild(row);});}
+function renderHeaderUser(){const me=currentUser(); els.userBadge.textContent=me?(me.name+' / '+coins(me.balance)):'未ログイン'; els.fromFixed.value=me? (me.name+'（残高：'+fmt.format(me.balance)+'）') : '未ログイン'; updateMorningButton(); renderJackpot();}
+function renderSelects(){const me=currentUser(); let list=state.users.filter(u=>!me||u.id!==me.id); if(me&&!isJackpot(me)) list=list.filter(u=>!isJackpot(u)); els.toSelect.innerHTML='<option value="">選択</option>'+list.map(u=>'<option value="'+u.id+'">'+u.name+'（'+fmt.format(u.balance)+'）</option>').join(''); els.memberFilter.innerHTML='<option value="">すべて</option>'+state.users.map(u=>'<option value="'+u.id+'">'+u.name+'</option>').join('');}
+function renderHistory(){const q=(els.searchInput.value||'').toLowerCase(); const f=els.memberFilter.value||''; els.historyBody.innerHTML=''; const frag=document.createDocumentFragment(); state.txs.filter(t=>{if(f && !((t.from&&t.from===f)||(t.to&&t.to===f)||(t.actedBy&&t.actedBy===f))) return false; if(!q) return true; const text=((t.memo||'')+' '+(t.title||'')).toLowerCase(); return text.includes(q);}).forEach(t=>{const tr=document.createElement('tr'); const c=x=>{const td=document.createElement('td'); td.innerHTML=x; return td;}; tr.append(c(ts2str(t.ts)), c(typeLabel(t.type)), c('<span class="pill">'+(nameOf(t.from)||'—')+'</span>'), c('<span class="pill">'+(nameOf(t.to)||'—')+'</span>'), c(t.title?(t.title+(t.memo?(' / '+t.memo):'')):(t.memo||'')), c('<span>'+ (t.amount?fmt.format(t.amount):'') +'</span>')); frag.appendChild(tr);}); els.historyBody.appendChild(frag);}
+function typeLabel(tp){return tp==='transfer'?'送金':tp==='purchase'?'購入':tp==='execute-request'?'実行申請':tp==='execute-done'?'実行（販売者）':tp==='execute-finalize'?'実行確定（購入者）':tp==='execute-cancel-ask'?'キャンセル申請（販売者）':tp==='execute-cancel-ok'?'キャンセル確定（購入者）':tp==='return'?'返品':tp==='mint'?'発行':tp==='fee'?'手数料':tp==='roulette'?'ルーレット':tp==='jackpot'?'ジャックポット':tp==='jpot-fee'?'JPOT入金':'—';}
+function renderListings(){els.listingBody.innerHTML=''; const me=currentUser(); state.listings.forEach(l=>{const remaining=(l.qty||1)-(l.sold||0); const tr=document.createElement('tr'); function td(text){const x=document.createElement('td'); x.textContent=text; return x;} tr.append(td(l.title+(l.active?'':'（停止中）')), (function(){const x=document.createElement('td'); x.innerHTML='<b>'+fmt.format(l.price)+'</b>'; return x;})(), td(remaining+'/'+l.qty), td(nameOf(l.sellerId)), td(l.desc||'')); const tdA=document.createElement('td'); if(me){ if(l.sellerId===me.id){const tog=document.createElement('button');tog.className='btn secondary';tog.textContent=l.active?'停止':'公開';tog.onclick=()=>toggleListingActive(l.id); const del=document.createElement('button'); del.className='btn secondary'; del.textContent='削除'; del.disabled=(l.sold||0)>0; del.onclick=()=>deleteListing(l.id); tdA.append(tog,document.createTextNode(' '),del);} else {const buy=document.createElement('button'); buy.className='btn'; buy.textContent='購入'; buy.disabled=!l.active || remaining<=0 || (me && isJackpot(me)); buy.onclick=()=>{buy.disabled=true; buyListing(l.id);}; tdA.appendChild(buy);} } else {const s=document.createElement('span'); s.className='chip'; s.textContent='ログインしてください'; tdA.appendChild(s);} tr.appendChild(tdA); els.listingBody.appendChild(tr);});}
+function renderRights(){els.rightsBody.innerHTML=''; const me=currentUser(); if(!me) return; state.rights.filter(r=>r.buyerId===me.id).forEach(r=>{const tr=document.createElement('tr'); function td(t){const x=document.createElement('td'); x.textContent=t; return x;} tr.append(td(ts2str(r.ts)), td(r.title), td(nameOf(r.sellerId)), td(statusLabel(r))); const tdA=document.createElement('td'); tdA.appendChild(rightActionButtons(r)); tr.appendChild(tdA); els.rightsBody.appendChild(tr);});}
+function statusLabel(r){return r.status==='owned'?'保有中':r.status==='request'?'販売者の対応待ち':r.status==='seller_executed'?'販売者が実行済（確認待ち）':r.status==='seller_cancel_requested'?'販売者がキャンセル申請（確認待ち）':r.status==='finalized'?(r.executed?'確定（実行済）':'確定（キャンセル）'):'—';}
+function rightActionButtons(r){const span=document.createElement('span'); if(r.status==='owned'){const btn=document.createElement('button'); btn.className='btn'; btn.textContent='実行を申請'; btn.onclick=()=>{btn.disabled=true; buyerRequest(r.id);}; const ret=document.createElement('button'); ret.className='btn secondary'; ret.textContent='返品'; ret.onclick=()=>{ret.disabled=true; buyerReturn(r.id);}; span.append(btn,document.createTextNode(' '),ret);} else if(r.status==='seller_executed'){const btn=document.createElement('button'); btn.className='btn'; btn.textContent='済（確定）'; btn.onclick=()=>{btn.disabled=true; buyerFinalize(r.id);}; span.appendChild(btn);} else if(r.status==='seller_cancel_requested'){const btn=document.createElement('button'); btn.className='btn secondary'; btn.textContent='キャンセル承認（確定）'; btn.onclick=()=>{btn.disabled=true; buyerFinalize(r.id);}; span.appendChild(btn);} else {const chip=document.createElement('span'); chip.className='chip'; chip.textContent='操作なし'; span.appendChild(chip);} return span;}
+function switchMarketSub(which){document.querySelectorAll('#tab-market .tab').forEach(s=>s.classList.toggle('active',s.dataset.sub===which)); els.marketSell.style.display=which==='sell'?'block':'none'; els.marketList.style.display=which==='list'?'block':'none';}
+function renderTabs(){const show=name=>{els.tabTransfer.style.display=name==='transfer'?'block':'none'; els.tabMarket.style.display=name==='market'?'block':'none'; els.tabMyRights.style.display=name==='myrights'?'block':'none'; els.tabGamble.style.display=name==='gamble'?'block':'none';}; const active=document.querySelector('.card .hd .tabbar .tab.active'); show(active?active.dataset.tab:'transfer');}
+function renderAll(){renderSummary(); renderWallets(); renderHeaderUser(); renderSelects(); renderHistory(); renderListings(); renderRights(); renderTabs();}
+els.registerBtn.addEventListener('click',()=>register(els.regName.value,els.regPass.value)); els.loginBtn.addEventListener('click',()=>login(els.loginName.value,els.loginPass.value)); els.logoutBtn.addEventListener('click',logout); els.sendBtn.addEventListener('click',()=>{transfer(els.toSelect.value,els.amountInput.value,els.memoInput.value); els.amountInput.value=''; els.memoInput.value='';}); els.searchInput.addEventListener('input',renderHistory); els.memberFilter.addEventListener('change',renderHistory); els.exportBtn.addEventListener('click',()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='trpg_token_v14.json'; a.click(); URL.revokeObjectURL(a.href);}); els.importFile.addEventListener('change',e=>{const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>{try{const data=JSON.parse(ev.target.result); const keep=state.currentUserId; state=Object.assign({version:14,approval:{active:false,votes:{}},lastRealUserId:null,vTick:(state.vTick||0)+1},data); state.currentUserId=keep||null; ensureJackpotUser(); saveLocal(); renderAll();}catch{toast('読み込み失敗')}}; r.readAsText(f); e.target.value='';}); document.querySelectorAll('.card .hd .tabbar .tab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.card .hd .tabbar .tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); renderTabs();})); els.subtabs.forEach(s=>s.addEventListener('click',()=>switchMarketSub(s.dataset.sub))); els.morningBtn.addEventListener('click',morningClaim); els.rouletteBtn.addEventListener('click',rouletteSpin);
+els.btnConnect.addEventListener('click',()=>{saveSyncSettings(); if(pollTimer) stopPolling(); else startPolling();}); els.btnSyncNow.addEventListener('click',()=>kvFetchLatest());
+loadLocal(); ensureJackpotUser(); state.listings.forEach(l=>{if(typeof l.qty!=='number') l.qty=1; if(typeof l.sold!=='number') l.sold=0;}); state.rights.forEach(r=>{if(!r.status){r.status=r.executed?'finalized':'owned';}}); loadSyncSettings(); renderAll(); if(state.users.filter(u=>!isJackpot(u)).length===0){toast('まずは新規登録してください（初期 10,000 coin） / ジャックポットは誰でもログイン可');}
+function jackpotUserInitFix(){if(typeof state.jackpot==='number'){jackpotUser().balance+=state.jackpot; delete state.jackpot;}}
+jackpotUserInitFix();
+})();
+</script>
 </body>
 </html>
