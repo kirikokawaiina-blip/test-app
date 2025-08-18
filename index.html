@@ -711,6 +711,7 @@
                 this.pollInterval = null;
                 this.pendingOperations = new Set();
                 this.onStateChanged = null;
+                this._pollRunning = false;
             }
 
             async sendOperation(operation) {
@@ -772,29 +773,104 @@
 
             async pollOperations() {
                 try {
-                    const res = await fetch(`${this.serverUrl}/operations?room=${this.roomId}&since=${this.lastOperationId}`);
-                    if (res.status === 204) return;
-                    if (!res.ok) {
-                        console.error('pollOperations failed', res.status);
+                    const url = `${this.serverUrl}/operations?room=${this.roomId}&since=${this.lastOpId || 0}`;
+                    const res = await fetch(url, { method: 'GET' });
+
+                    // If server signals no content, stop quietly
+                    if (res.status === 204) {
                         return;
                     }
-                    const data = await res.json();
-                    if (!data || !data.operations || data.operations.length === 0) return;
 
-                    for (const op of data.operations) {
-                        // ignore if we originated it recently
-                        if (op.operation && this.pendingOperations.has(op.operation.opId)) {
-                            this.pendingOperations.delete(op.operation.opId);
-                            continue;
-                        }
-                        this.applyOperation(op);
+                    // Read as text first and attempt to parse JSON.
+                    const text = await res.text();
+                    if (!text) return;
+
+                    let data;
+                    try {
+                      data = JSON.parse(text);
+                    } catch (e) {
+                      console.error('pollOperations: invalid JSON from server', e, 'raw:', text);
+                      return; // ignore this poll result
                     }
 
-                    this.lastOperationId = data.latestId || this.lastOperationId;
-                    if (this.onStateChanged) this.onStateChanged();
-                } catch (err) {
-                    console.error('pollOperations error', err);
+                    if (!data || !Array.isArray(data.operations)) return;
+
+                    for (const op of data.operations) {
+                      if (this.pendingOperations && this.pendingOperations.has(op.opId)) {
+                        // This was originated locally and already applied; remove echo
+                        this.pendingOperations.delete(op.opId);
+                        continue;
+                      }
+                      try {
+                        this.applyOperation(op);
+                      } catch (e) {
+                        console.error('applyOperation error', e, op);
+                      }
+                      this.lastOpId = Math.max(this.lastOpId || 0, op.id || 0);
+                    }
+
+                    // update UI status if available
+                    try { if (els && els.syncStatus) els.syncStatus.textContent = `synced @ ${new Date().toLocaleTimeString()}`; } catch(e){}
+                } catch (e) {
+                    console.error('pollOperations error', e);
                 }
+            }
+
+            async syncFullState() {
+              try {
+                const url = `${this.serverUrl}/operations?room=${this.roomId}&since=0`;
+                const res = await fetch(url, { method: 'GET' });
+                if (res.status === 204) return;
+                const text = await res.text();
+                if (!text) return;
+                let data;
+                try { data = JSON.parse(text); } catch (e) {
+                  console.error('syncFullState: invalid JSON', e, 'raw:', text);
+                  return;
+                }
+                if (!data || !Array.isArray(data.operations)) return;
+                for (const op of data.operations) {
+                  if (this.pendingOperations && this.pendingOperations.has(op.opId)) {
+                    this.pendingOperations.delete(op.opId);
+                    continue;
+                  }
+                  try { this.applyOperation(op); } catch (e) { console.error('syncFullState apply error', e, op); }
+                  this.lastOpId = Math.max(this.lastOpId || 0, op.id || 0);
+                }
+                try { if (els && els.syncStatus) els.syncStatus.textContent = `synced @ ${new Date().toLocaleTimeString()}`; } catch(e){}
+              } catch (e) {
+                console.error('syncFullState error', e);
+              }
+            }
+
+            // replace startPolling with a poll loop that works well with long-polling
+            startPolling(interval = 1000) {
+              if (this._pollRunning) return;
+              this._pollRunning = true;
+              (async () => {
+                // initial full sync so late joiners get history
+                await this.syncFullState();
+
+                while (this._pollRunning) {
+                  try {
+                    await this.pollOperations();
+                  } catch (e) {
+                    console.error('poll loop error', e);
+                    // backoff before retrying
+                    await new Promise(r => setTimeout(r, interval));
+                  }
+                }
+              })();
+              try { if (els && els.syncStatus) els.syncStatus.textContent = 'polling...'; } catch(e){}
+            }
+
+            stopPolling() {
+              this._pollRunning = false;
+              // keep compatibility with possible timer-based implementations
+              if (this.pollTimer) {
+                clearInterval(this.pollTimer);
+                this.pollTimer = null;
+              }
             }
 
             applyOperation(op) {
@@ -893,9 +969,12 @@
             }
 
             startPolling(interval = 1000) {
-                if (this.pollInterval) return;
-                els.syncStatus.textContent = '同期中';
-                this.pollInterval = setInterval(() => this.pollOperations(), interval);
+                if (this.pollTimer) return;
+                // use a safe wrapper so unhandled rejections are logged
+                this.pollTimer = setInterval(() => {
+                  this.pollOperations().catch(e => console.error('pollOperations (interval) error', e));
+                }, interval);
+                try { if (els && els.syncStatus) els.syncStatus.textContent = 'polling...'; } catch(e){}
             }
 
             stopPolling() {
