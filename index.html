@@ -144,6 +144,75 @@
         display: grid;
         gap: 6px
     }</style>
+
+  <style>
+    :root{
+      --bg:#0a1024; --bg2:#0d1430; --panel:#0e1836; --line:#60efff22;
+      --text:#e6f3ff; --muted:#9fb3c8; --accent:#60efff; --accent2:#2f80ed;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font:14px/1.6 system-ui,Segoe UI,Roboto,Helvetica,Arial;
+      color:var(--text); background:linear-gradient(180deg,#060c1a, var(--bg));
+    }
+    h1,h2,h3{margin:0 0 8px}
+    a{color:var(--accent); text-decoration:none}
+    .container{max-width:1200px; margin:20px auto; padding:0 16px}
+
+    .card{
+      background:var(--panel); border:1px solid var(--line);
+      border-radius:16px; padding:14px; box-shadow:0 10px 30px #0004;
+    }
+    .card .hd{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px}
+    .card .hd h2{font-size:16px; font-weight:800}
+    .tabbar{display:flex; gap:6px}
+    .tabbar .tab{
+      font-weight:700; padding:6px 10px; border-radius:999px; cursor:pointer;
+      border:1px solid var(--line); background:transparent; color:var(--muted);
+    }
+    .tabbar .tab.active{background:linear-gradient(180deg,var(--accent) ,var(--accent2)); color:#00121a}
+
+    .btn{
+      display:inline-block; padding:10px 14px; border-radius:12px; font-weight:800; border:0; cursor:pointer;
+      background:linear-gradient(180deg,var(--accent),var(--accent2)); color:#00121a;
+      box-shadow:0 8px 20px #0bf5ff33; transition:transform .05s;
+    }
+    .btn:active{transform:translateY(1px)}
+    .btn.secondary{
+      background:#1a2a55; color:var(--text); border:1px solid var(--line); box-shadow:none;
+    }
+    .btn:disabled,.btn.secondary:disabled{opacity:.5; cursor:not-allowed}
+
+    input,select,textarea{
+      width:100%; background:#0b1430; color:var(--text); border:1px solid var(--line);
+      border-radius:10px; padding:9px 10px; outline:none;
+    }
+    input::placeholder,textarea::placeholder{color:#7f93ab}
+
+    .grid{display:grid; gap:16px}
+    .grid.cols-3{grid-template-columns: 1.2fr 1fr 1.2fr}
+    @media (max-width:900px){ .grid.cols-3{grid-template-columns:1fr} }
+
+    .pill{
+      display:inline-block; padding:4px 8px; border-radius:999px; font-weight:750;
+      background:#091430; border:1px solid var(--line); color:var(--accent);
+    }
+    .chip{
+      display:inline-block; padding:6px 10px; border-radius:999px; background:#0c1736;
+      border:1px solid var(--line); color:var(--muted); font-weight:700;
+    }
+
+    table{width:100%; border-collapse:separate; border-spacing:0 8px}
+    td,th{padding:8px 10px; text-align:left}
+    thead th{color:var(--muted); font-weight:800}
+    tbody tr{background:#0b1632; border:1px solid var(--line)}
+    tbody tr td:first-child{border-top-left-radius:12px; border-bottom-left-radius:12px}
+    tbody tr td:last-child{border-top-right-radius:12px; border-bottom-right-radius:12px}
+
+    #toast{position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:9}
+    .status{color:var(--muted); font-weight:700}
+  </style>
 </head>
 <body>
 <header>
@@ -529,6 +598,13 @@
                     body: payload
                 });
                 if (res.ok) {
+                      // 送信側でも lastV を即更新
+                  try {
+                    const data = await res.json();
+                    if (typeof data.v === 'number') {
+                      localStorage.setItem('trpg_sync_kv_v', String(data.v));
+                    }
+                  } catch {}
                     els.lastSyncChip.textContent = '最終同期：送信 ' + new Date().toLocaleTimeString();
                 }
             } catch (e) {
@@ -691,7 +767,7 @@
             title = (title || '').trim();
             desc = (desc || '').trim();
             price = Math.floor(Number(price));
-            let qty = Math.floor(Number(els.listQty.value || 1));
+          let qty = Math.floor(Number((els.listQty && els.listQty.value) || 1));
             if (!title || !(price > 0) || !(qty > 0)) {
                 toast('入力を確認');
                 return;
@@ -1388,6 +1464,10 @@
             renderTabs();
         }));
         els.subtabs.forEach(s => s.addEventListener('click', () => switchMarketSub(s.dataset.sub)));
+        els.createListingBtn.addEventListener('click', () => {
+          createListing(els.listTitle.value, els.listPrice.value, els.listDesc.value);
+        });
+
         els.morningBtn.addEventListener('click', morningClaim);
         els.rouletteBtn.addEventListener('click', rouletteSpin);
         els.btnConnect.addEventListener('click', () => {
