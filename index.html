@@ -661,6 +661,16 @@
             if (!skipPush) schedulePush();
         }
 
+        // Debounced push to kv endpoint (legacy PUT-based sync). Keep small and safe.
+        let _scheduleTimer = null;
+        function schedulePush(delay = 300) {
+            if (_scheduleTimer) clearTimeout(_scheduleTimer);
+            _scheduleTimer = setTimeout(() => {
+                _scheduleTimer = null;
+                kvPushState().catch(e => console.error('kvPushState error', e));
+            }, delay);
+        }
+
         function loadLocal() {
             try {
                 const raw = localStorage.getItem(LS_KEY);
@@ -732,16 +742,31 @@
                         body: JSON.stringify(payload)
                     });
 
+                    const txt = await res.text();
+                    let data = null;
+                    try { data = txt ? JSON.parse(txt) : null; } catch (e) { /* non-json */ }
+
                     if (!res.ok) {
-                        const txt = await res.text();
                         console.error('sendOperation failed', res.status, txt);
+                        // if server returned a latest state, reconcile
+                        if (data && data.newState) {
+                            const keep = state.currentUserId;
+                            state = data.newState;
+                            state.currentUserId = keep || null;
+                            saveLocal(true);
+                            renderAll();
+                        }
                         return null;
                     }
 
-                    const data = await res.json();
-                    // track pending by opId so poll can ignore echo
+                    // success
+                    if (data && data.operationId) {
+                        this.pendingOperations.add(opId);
+                        return data.operationId;
+                    }
+                    // fallback
                     this.pendingOperations.add(opId);
-                    return data.operationId || null;
+                    return null;
                 } catch (err) {
                     console.error('sendOperation error', err);
                     return null;
