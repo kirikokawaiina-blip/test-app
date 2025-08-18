@@ -701,27 +701,212 @@
             localStorage.setItem(syncStoreKey, JSON.stringify(syncSettings));
         }
 
-        let pollTimer = null, pushTimer = null;
-
-        function startPolling() {
-            stopPolling();
-            els.syncStatus.textContent = '同期中';
-            kvFetchLatest();
-            pollTimer = setInterval(kvFetchLatest, 1500);
-        }
-
-        function stopPolling() {
-            if (pollTimer) {
-                clearInterval(pollTimer);
-                pollTimer = null;
+        // 操作ベースの同期システム
+        class OperationBasedSync {
+            constructor(serverUrl, roomId, userId) {
+                this.serverUrl = serverUrl.replace(/\/+$/,'');
+                this.roomId = roomId;
+                this.userId = userId || 'anonymous';
+                this.lastOperationId = 0;
+                this.pollInterval = null;
+                this.pendingOperations = new Set();
+                this.onStateChanged = null;
             }
-            els.syncStatus.textContent = '停止中';
+
+            async sendOperation(operation) {
+                const opId = operation.opId || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                const payload = {
+                    userId: this.userId,
+                    operation: {
+                        ...operation,
+                        opId,
+                        timestamp: Date.now()
+                    }
+                };
+
+                try {
+                    const res = await fetch(`${this.serverUrl}/operations?room=${this.roomId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!res.ok) {
+                        const txt = await res.text();
+                        console.error('sendOperation failed', res.status, txt);
+                        return null;
+                    }
+
+                    const data = await res.json();
+                    // track pending by opId so poll can ignore echo
+                    this.pendingOperations.add(opId);
+                    return data.operationId || null;
+                } catch (err) {
+                    console.error('sendOperation error', err);
+                    return null;
+                }
+            }
+
+            async sendBatchOperations(opsArray) {
+                const payload = {
+                    userId: this.userId,
+                    operation: { type: 'BATCH', operations: opsArray.map(o => ({ ...o, opId: o.opId || `${Date.now()}-${Math.random().toString(36).slice(2)}`, timestamp: Date.now() })) }
+                };
+                try {
+                    const res = await fetch(`${this.serverUrl}/operations?room=${this.roomId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!res.ok) {
+                        console.error('sendBatchOperations failed', res.status);
+                        return null;
+                    }
+                    const data = await res.json();
+                    return data;
+                } catch (err) {
+                    console.error('sendBatchOperations error', err);
+                    return null;
+                }
+            }
+
+            async pollOperations() {
+                try {
+                    const res = await fetch(`${this.serverUrl}/operations?room=${this.roomId}&since=${this.lastOperationId}`);
+                    if (res.status === 204) return;
+                    if (!res.ok) {
+                        console.error('pollOperations failed', res.status);
+                        return;
+                    }
+                    const data = await res.json();
+                    if (!data || !data.operations || data.operations.length === 0) return;
+
+                    for (const op of data.operations) {
+                        // ignore if we originated it recently
+                        if (op.operation && this.pendingOperations.has(op.operation.opId)) {
+                            this.pendingOperations.delete(op.operation.opId);
+                            continue;
+                        }
+                        this.applyOperation(op);
+                    }
+
+                    this.lastOperationId = data.latestId || this.lastOperationId;
+                    if (this.onStateChanged) this.onStateChanged();
+                } catch (err) {
+                    console.error('pollOperations error', err);
+                }
+            }
+
+            applyOperation(op) {
+                const operation = op.operation || {};
+                switch (operation.type) {
+                    case 'TRANSFER': {
+                        const from = findUserById(operation.fromId);
+                        const to = findUserById(operation.toId);
+                        if (!from || !to) return;
+                        if (from.balance < operation.amount) return;
+                        from.balance -= operation.amount;
+                        to.balance += operation.amount;
+                        addTx({ type: 'transfer', from: from.id, to: to.id, amount: operation.amount, memo: operation.memo || '' });
+                        bump();
+                        saveLocal(true);
+                        break;
+                    }
+
+                    case 'CREATE_LISTING': {
+                        const l = {
+                            id: operation.listingId || `listing_${Date.now()}_${Math.random().toString(36).substr(2,6)}`,
+                            title: operation.title,
+                            price: operation.price,
+                            desc: operation.desc || operation.description || '',
+                            sellerId: operation.sellerId || op.userId,
+                            active: true,
+                            ts: operation.timestamp || Date.now(),
+                            qty: operation.qty || 1,
+                            sold: 0
+                        };
+                        state.listings.unshift(l);
+                        bump();
+                        saveLocal(true);
+                        break;
+                    }
+
+                    case 'PURCHASE': {
+                        const buyer = findUserById(operation.buyerId);
+                        const listing = state.listings.find(x => x.id === operation.listingId && x.active);
+                        if (!buyer || !listing) return;
+                        if (buyer.balance < listing.price) return;
+                        const seller = findUserById(listing.sellerId);
+                        if (!seller) return;
+                        // fee to jackpot (existing logic uses 10%)
+                        const fee = Math.floor(listing.price * 0.10);
+                        const sellerReceive = listing.price - fee;
+                        const j = jackpotUser();
+                        buyer.balance -= listing.price;
+                        seller.balance += sellerReceive;
+                        if (j) j.balance += fee;
+                        listing.sold = (listing.sold || 0) + 1;
+                        if (listing.sold >= (listing.qty || 1)) listing.active = false;
+                        const right = { id: operation.rightId || `right_${Date.now()}_${Math.random().toString(36).substr(2,6)}`, listingId: listing.id, title: listing.title, buyerId: buyer.id, sellerId: seller.id, ts: Date.now(), status: 'owned', executed: false };
+                        state.rights.unshift(right);
+                        addTx({ type: 'purchase', from: buyer.id, to: seller.id, amount: listing.price, listingId: listing.id, title: listing.title, memo: '権利購入（手数料10%）' });
+                        addTx({ type: 'fee', from: seller.id, to: j ? j.id : 'jpot', amount: fee, listingId: listing.id, title: listing.title, memo: '販売手数料' });
+                        bump();
+                        saveLocal(true);
+                        break;
+                    }
+
+                    case 'SET_VALUE': {
+                        state[operation.key] = operation.value;
+                        bump();
+                        saveLocal(true);
+                        break;
+                    }
+
+                    case 'INCREMENT': {
+                        state[operation.key] = (state[operation.key] || 0) + operation.amount;
+                        bump();
+                        saveLocal(true);
+                        break;
+                    }
+
+                    case 'ADD_ITEM': {
+                        if (!state[operation.listKey]) state[operation.listKey] = [];
+                        state[operation.listKey].push(operation.item);
+                        bump();
+                        saveLocal(true);
+                        break;
+                    }
+
+                    case 'REMOVE_ITEM': {
+                        if (!state[operation.listKey]) return;
+                        const idx = state[operation.listKey].findIndex(i => i.id === operation.itemId);
+                        if (idx !== -1) state[operation.listKey].splice(idx,1);
+                        bump();
+                        saveLocal(true);
+                        break;
+                    }
+
+                    default:
+                        console.warn('Unknown operation type (client apply):', operation.type);
+                }
+            }
+
+            startPolling(interval = 1000) {
+                if (this.pollInterval) return;
+                els.syncStatus.textContent = '同期中';
+                this.pollInterval = setInterval(() => this.pollOperations(), interval);
+            }
+
+            stopPolling() {
+                if (!this.pollInterval) return;
+                clearInterval(this.pollInterval);
+                this.pollInterval = null;
+                els.syncStatus.textContent = '停止中';
+            }
         }
 
-        function schedulePush() {
-            if (pushTimer) clearTimeout(pushTimer);
-            pushTimer = setTimeout(kvPushState, 180);
-        }
+        let sync = null;
 
         async function kvFetchLatest() {
             if (!syncSettings.url || !syncSettings.room || !syncSettings.key) return;
@@ -849,6 +1034,10 @@
             bump();
             saveLocal();
             renderAll();
+            // If sync is active, update its userId to the newly registered user
+            if (sync) {
+                try { sync.userId = u.id; } catch (e) {}
+            }
             toast('登録完了');
         }
 
@@ -873,6 +1062,10 @@
             localStorage.setItem('last_current_uid', state.currentUserId || '');
             saveLocal(true);
             renderAll();
+            // Update sync userId so subsequent operations carry correct user identity
+            if (sync) {
+                try { sync.userId = state.currentUserId || (state.lastRealUserId || 'anonymous'); } catch (e) {}
+            }
             toast('ログイン');
         }
 
@@ -881,6 +1074,10 @@
             localStorage.setItem('last_current_uid', '');
             saveLocal(true);
             renderAll();
+            // reflect logout in sync
+            if (sync) {
+                try { sync.userId = state.lastRealUserId || 'anonymous'; } catch (e) {}
+            }
             toast('ログアウト');
         }
 
@@ -888,7 +1085,7 @@
             return findUserById(state.currentUserId);
         }
 
-        function transfer(toId, amount, memo) {
+        async function transfer(toId, amount, memo) {
             const from = currentUser();
             if (!from) {
                 toast('ログインが必要');
@@ -916,15 +1113,30 @@
                 toast('残高不足');
                 return;
             }
-            from.balance -= amount;
-            to.balance += amount;
-            addTx({type: 'transfer', from: from.id, to: to.id, amount, memo: (memo || '').trim()});
-            bump();
-            saveLocal();
-            renderAll();
+
+            const op = {
+                type: 'TRANSFER',
+                fromId: from.id,
+                toId: to.id,
+                amount: amount,
+                memo: (memo || '').trim(),
+                opId: `transfer_${Date.now()}_${Math.random().toString(36).substr(2,6)}`
+            };
+
+            if (sync) {
+                const res = await sync.sendOperation(op);
+                if (!res) toast('同期送信に失敗しました');
+            } else {
+                from.balance -= amount;
+                to.balance += amount;
+                addTx({type: 'transfer', from: from.id, to: to.id, amount, memo: (memo || '').trim()});
+                bump();
+                saveLocal();
+                renderAll();
+            }
         }
 
-        function createListing(title, price, desc) {
+    async function createListing(title, price, desc) {
             const seller = currentUser();
             if (!seller) {
                 toast('ログインが必要');
@@ -942,14 +1154,30 @@
                 toast('入力を確認');
                 return;
             }
-            const l = {id: id(), title, price, desc, sellerId: seller.id, active: true, ts: Date.now(), qty, sold: 0};
-            state.listings.unshift(l);
-            bump();
-            saveLocal();
-            renderAll();
+            const op = {
+                type: 'CREATE_LISTING',
+                title,
+                price,
+                desc,
+                sellerId: seller.id,
+                qty,
+                listingId: `listing_${Date.now()}_${Math.random().toString(36).substr(2,6)}`,
+                opId: `create_${Date.now()}_${Math.random().toString(36).substr(2,6)}`
+            };
+
+            if (sync) {
+                const res = await sync.sendOperation(op);
+                if (!res) toast('同期送信に失敗しました');
+            } else {
+                const l = {id: id(), title, price, desc, sellerId: seller.id, active: true, ts: Date.now(), qty, sold: 0};
+                state.listings.unshift(l);
+                bump();
+                saveLocal();
+                renderAll();
+            }
         }
 
-        function buyListing(listingId) {
+    async function buyListing(listingId) {
             const buyer = currentUser();
             if (!buyer) {
                 toast('ログインが必要');
@@ -981,49 +1209,45 @@
                 toast('残高不足');
                 return;
             }
-            const seller = findUserById(l.sellerId);
-            const j = jackpotUser();
-            const fee = Math.floor(l.price * 0.10);
-            const sellerReceive = l.price - fee;
-            buyer.balance -= l.price;
-            seller.balance += sellerReceive;
-            j.balance += fee;
-            const right = {
-                id: id(),
-                listingId: l.id,
-                title: l.title,
+            const op = {
+                type: 'PURCHASE',
                 buyerId: buyer.id,
-                sellerId: seller.id,
-                ts: Date.now(),
-                status: 'owned',
-                executed: false
+                listingId: l.id,
+                opId: `purchase_${Date.now()}_${Math.random().toString(36).substr(2,6)}`
             };
-            state.rights.unshift(right);
-            l.sold = (l.sold || 0) + 1;
-            if (l.sold >= l.qty) {
-                l.active = false;
+
+            if (sync) {
+                const res = await sync.sendOperation(op);
+                if (!res) toast('同期送信に失敗しました');
+            } else {
+                const seller = findUserById(l.sellerId);
+                const j = jackpotUser();
+                const fee = Math.floor(l.price * 0.10);
+                const sellerReceive = l.price - fee;
+                buyer.balance -= l.price;
+                seller.balance += sellerReceive;
+                if (j) j.balance += fee;
+                const right = {
+                    id: id(),
+                    listingId: l.id,
+                    title: l.title,
+                    buyerId: buyer.id,
+                    sellerId: seller.id,
+                    ts: Date.now(),
+                    status: 'owned',
+                    executed: false
+                };
+                state.rights.unshift(right);
+                l.sold = (l.sold || 0) + 1;
+                if (l.sold >= l.qty) {
+                    l.active = false;
+                }
+                addTx({ type: 'purchase', from: buyer.id, to: seller.id, amount: l.price, listingId: l.id, title: l.title, memo: '権利購入（手数料10%）' });
+                addTx({ type: 'fee', from: seller.id, to: j ? j.id : 'jpot', amount: fee, listingId: l.id, title: l.title, memo: '販売手数料' });
+                bump();
+                saveLocal();
+                renderAll();
             }
-            addTx({
-                type: 'purchase',
-                from: buyer.id,
-                to: seller.id,
-                amount: l.price,
-                listingId: l.id,
-                title: l.title,
-                memo: '権利購入（手数料10%）'
-            });
-            addTx({
-                type: 'fee',
-                from: seller.id,
-                to: j.id,
-                amount: fee,
-                listingId: l.id,
-                title: l.title,
-                memo: '販売手数料'
-            });
-            bump();
-            saveLocal();
-            renderAll();
         }
 
         function deleteListing(listingId) {
@@ -1046,10 +1270,15 @@
                 toast('購入履歴があるため削除不可');
                 return;
             }
-            state.listings.splice(idx, 1);
-            bump();
-            saveLocal();
-            renderAll();
+            const op = { type: 'REMOVE_LISTING', listingId: listingId, opId: `rm_${Date.now()}_${Math.random().toString(36).substr(2,6)}` };
+            if (sync) {
+                sync.sendOperation(op);
+            } else {
+                state.listings.splice(idx, 1);
+                bump();
+                saveLocal();
+                renderAll();
+            }
         }
 
         function toggleListingActive(listingId) {
@@ -1067,10 +1296,15 @@
                 toast('自分の出品のみ');
                 return;
             }
-            l.active = !l.active;
-            bump();
-            saveLocal();
-            renderAll();
+            const op = { type: 'TOGGLE_LISTING', listingId, opId: `tgl_${Date.now()}_${Math.random().toString(36).substr(2,6)}` };
+            if (sync) {
+                sync.sendOperation(op);
+            } else {
+                l.active = !l.active;
+                bump();
+                saveLocal();
+                renderAll();
+            }
         }
 
         function buyerReturn(rightId) {
@@ -1642,7 +1876,24 @@
         els.rouletteBtn.addEventListener('click', rouletteSpin);
         els.btnConnect.addEventListener('click', () => {
             saveSyncSettings();
-            if (pollTimer) stopPolling(); else startPolling();
+            // toggle OperationBasedSync
+            if (sync && sync.pollInterval) {
+                sync.stopPolling();
+                sync = null;
+            } else {
+                if (syncSettings.url && syncSettings.room) {
+                    // ensure current user id used
+                    const uid = currentUser() ? currentUser().id : (state.lastRealUserId || 'anonymous');
+                    sync = new OperationBasedSync(syncSettings.url, syncSettings.room, uid);
+                    sync.onStateChanged = () => {
+                        // re-render after ops applied
+                        renderAll();
+                    };
+                    sync.startPolling();
+                } else {
+                    toast('同期設定を入力してください');
+                }
+            }
         });
         els.btnSyncNow.addEventListener('click', () => kvFetchLatest());
         loadLocal();
