@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>trpg鯖 トークン | Cloudflare同期版 v19 (KV-poll)</title>
+    <title>trpg鯖 トークン | Cloudflare同期版 v14 (KV-poll)</title>
     <meta name="description" content="Cloudflare Workers + KV を使ったルーム同期（無料プラン対応）。"/>
     <style>body {
         margin: 0;
@@ -185,11 +185,11 @@
       line-height: 1.5;
     }
     .tabbar{display:flex; gap:6px}
-    .tabbar .tab{
-      font-weight:700; padding:6px 10px; border-radius:999px; cursor:pointer;
-      border:1px solid var(--line); background:transparent; color:var(--muted);
-    }
-    .tabbar .tab.active{background:linear-gradient(180deg,var(--accent) ,var(--accent2)); color:#00121a}
+        .tabbar .tab{
+            font-weight:700; padding:6px 10px; border-radius:999px; cursor:pointer;
+            border:1px solid var(--line); background:transparent; color:#ffffff; /* inactive = white text */
+        }
+        .tabbar .tab.active{background:linear-gradient(180deg,var(--accent) ,var(--accent2)); color:#000000 /* active = black text */}
 
     .btn{
       display:inline-block; 
@@ -385,6 +385,10 @@
     }
     /* Hide webkit scrollbars visually while keeping scroll behavior */
     .card .bd .table::-webkit-scrollbar { display: none; height: 0; width: 0; }
+    /* rights highlight */
+    .pending-right { background: linear-gradient(180deg, rgba(255,50,50,0.06), rgba(255,50,50,0.02)); border:1px solid rgba(255,50,50,0.12); }
+    .done-right { background: rgba(255,255,255,0.02); color: rgba(255,255,255,0.7); }
+    #sellerRightsSection .btn{ margin-left:8px }
 </style>
 
 </head>
@@ -533,6 +537,10 @@
                             <tbody id="rightsBody"></tbody>
                         </table>
                     </div>
+                                <div style="margin-top:12px">
+                                    <h4 style="margin:6px 0 8px">出品された権利（販売者用）</h4>
+                                    <div id="sellerRightsSection" class="panel" style="max-height:260px;overflow-y:auto;padding:8px"></div>
+                                </div>
                 </div>
                 <div id="tab-gamble" style="display:none">
                     <div class="panel"><label>TRPGジャックポット</label>
@@ -813,10 +821,39 @@
             appliedOpIds.add(operation.id);
             // show optimistic indicator locally, but do not persist full state locally
             applyOperationLocally(operation);
-            sendOperationsToServer([operation]).catch(e => {
-                console.error('sendOperationsToServer error', e);
-                toast('操作の送信に失敗しました');
-            });
+            // fire-and-handle response for user feedback
+            (async () => {
+                const res = await sendOperationsToServer([operation]);
+                if (!res.ok) {
+                    console.error('sendOperationsToServer error', res.error);
+                    toast('操作の送信に失敗しました: ' + (res.error || '通信エラー'));
+                    return;
+                }
+                const d = res.data || {};
+                if (d.conflicts && d.conflicts.length) {
+                    toast('サーバーで競合が発生しました: ' + (d.conflicts[0].message || d.conflicts[0].type));
+                } else {
+                    // inspect notify for refund details
+                    const notify = d.notify || {};
+                    // If there are newTxs indicating seller_refund, show detailed message
+                    const txs = (notify.newTxs || []).slice();
+                    const refundTx = txs.find(t => t && t.type === 'seller_refund');
+                    let msgShown = false;
+                    if (refundTx) {
+                        const amt = refundTx.amount || 0;
+                        const listingId = refundTx.listingId || '';
+                        // check if listing was updated in notify
+                        const updatedListings = notify.updatedListings || [];
+                        const recovered = updatedListings.find(l => l.id === listingId && l.sold < (l.qty || 1));
+                        const recoveredMsg = recovered ? '、出品在庫が回復しました' : '';
+                        toast(`返金成功: ¥${amt}${recoveredMsg}`);
+                        msgShown = true;
+                    }
+                    if (!msgShown) {
+                        toast('操作がサーバーで処理されました');
+                    }
+                }
+            })();
         }
 
         // Immediately send operations to server and apply returned newState
@@ -1310,6 +1347,13 @@
                         for (const up of data.notify.updatedListings) {
                             const idx = state.listings.findIndex(x => x.id === up.id);
                             if (idx !== -1) state.listings[idx] = up; else state.listings.unshift(up);
+                        }
+                    }
+                    // merge updated rights by id
+                    if (Array.isArray(data.notify.updatedRights) && data.notify.updatedRights.length) {
+                        for (const up of data.notify.updatedRights) {
+                            const idx = state.rights.findIndex(x => x.id === up.id);
+                            if (idx !== -1) state.rights[idx] = up; else state.rights.unshift(up);
                         }
                     }
                     // remove deleted listings
@@ -1995,6 +2039,7 @@
             els.rightsBody.innerHTML = '';
             const me = currentUser();
             if (!me) return;
+            // Purchaser's rights
             state.rights.filter(r => r.buyerId === me.id).forEach(r => {
                 const tr = document.createElement('tr');
 
@@ -2010,6 +2055,49 @@
                 tr.appendChild(tdA);
                 els.rightsBody.appendChild(tr);
             });
+
+            // Seller's view: list rights where current user is seller
+            const sellerSection = document.getElementById('sellerRightsSection');
+            if (sellerSection) {
+                sellerSection.innerHTML = '';
+                state.rights.filter(r => r.sellerId === me.id).sort((a,b) => (a.status=== 'owned'?1:0) - (b.status==='owned'?1:0) || (a.ts||0)-(b.ts||0)).forEach(r => {
+                    const div = document.createElement('div');
+                    div.className = 'seller-right' + (r.status !== 'finalized' ? ' pending-right' : ' done-right');
+                    div.style.padding = '8px';
+                    div.style.borderBottom = '1px solid rgba(255,255,255,.04)';
+                    const left = document.createElement('div');
+                    left.textContent = `${ts2str(r.ts)} ${r.title} （購入者: ${nameOf(r.buyerId)}）`;
+                    const btns = document.createElement('div');
+                    btns.style.marginTop = '6px';
+                    if (r.status === 'request') {
+                        const rep = document.createElement('button'); rep.className = 'btn'; rep.textContent = '実行完了を報告'; rep.onclick = () => { rep.disabled = true; const op = createOperation('report_execution', { rightId: r.id }); queueOperation(op); };
+                        btns.appendChild(rep);
+                    } else if (r.status === 'buyer_rejected') {
+                        const info = document.createElement('span'); info.className = 'chip'; info.textContent = '購入者により拒否済み'; info.style.fontWeight = '800'; info.style.color = '#ff8080'; btns.appendChild(info);
+                        // allow seller to perform a refund after rejection
+                        const refundBtn = document.createElement('button'); refundBtn.className = 'btn secondary'; refundBtn.textContent = '返金する';
+                        refundBtn.onclick = () => {
+                            // show simple inline prompt for amount
+                            const amt = prompt('返金金額を入力してください（空欄で全額）：', '');
+                            let num = null;
+                            if (amt !== null && amt.trim() !== '') {
+                                num = parseInt(amt.replace(/[^0-9]/g, ''), 10);
+                                if (isNaN(num) || num <= 0) { toast('無効な金額です'); return; }
+                            }
+                            refundBtn.disabled = true;
+                            const payload = { rightId: r.id };
+                            if (typeof num === 'number') payload.amount = num;
+                            const op = createOperation('seller_refund', payload);
+                            queueOperation(op);
+                            toast('返金リクエストを送信しました');
+                        };
+                        btns.appendChild(document.createTextNode(' ')); btns.appendChild(refundBtn);
+                    } else if (r.status === 'finalized') {
+                        const info = document.createElement('span'); info.className = 'chip'; info.textContent = '完了済'; btns.appendChild(info);
+                    }
+                    div.appendChild(left); div.appendChild(btns); sellerSection.appendChild(div);
+                });
+            }
         }
 
         function statusLabel(r) {
@@ -2018,7 +2106,7 @@
 
         function rightActionButtons(r) {
             const span = document.createElement('span');
-            if (r.status === 'owned') {
+                if (r.status === 'owned') {
                 const btn = document.createElement('button');
                 btn.className = 'btn';
                 btn.textContent = '実行を申請';
@@ -2034,15 +2122,18 @@
                     buyerReturn(r.id);
                 };
                 span.append(btn, document.createTextNode(' '), ret);
-            } else if (r.status === 'seller_executed') {
-                const btn = document.createElement('button');
-                btn.className = 'btn';
-                btn.textContent = '済（確定）';
-                btn.onclick = () => {
-                    btn.disabled = true;
-                    buyerFinalize(r.id);
-                };
-                span.appendChild(btn);
+            } else if (r.status === 'seller_executed' || r.status === 'seller_reported') {
+                // When seller reported execution, buyer can confirm or reject (reject allowed once)
+                const confirmBtn = document.createElement('button'); confirmBtn.className = 'btn'; confirmBtn.textContent = '承認（確認）'; confirmBtn.onclick = () => { confirmBtn.disabled = true; const op = createOperation('buyer_confirm', { rightId: r.id }); queueOperation(op); };
+                const rejectBtn = document.createElement('button'); rejectBtn.className = 'btn secondary'; rejectBtn.textContent = '拒否（1回）';
+                // disable if already rejected according to server-side counter
+                if (r.rejectionCount && r.rejectionCount >= 1) {
+                    rejectBtn.disabled = true;
+                    rejectBtn.title = '既に拒否済みです';
+                } else {
+                    rejectBtn.onclick = () => { rejectBtn.disabled = true; const op = createOperation('buyer_reject', { rightId: r.id }); queueOperation(op); };
+                }
+                span.append(confirmBtn, document.createTextNode(' '), rejectBtn);
             } else if (r.status === 'seller_cancel_requested') {
                 const btn = document.createElement('button');
                 btn.className = 'btn secondary';
