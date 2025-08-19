@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>trpg鯖 トークン | Cloudflare同期版 v14 (KV-poll)</title>
+    <title>trpg鯖 トークン | Cloudflare同期版 v16 (KV-poll)</title>
     <meta name="description" content="Cloudflare Workers + KV を使ったルーム同期（無料プラン対応）。"/>
     <style>body {
         margin: 0;
@@ -1253,9 +1253,11 @@
 
                 if (data.state && data.lastUpdate && data.lastUpdate > (lastSyncTime || 0)) {
                     const keep = state.currentUserId;
-                    // Merge in important lists so clients stay consistent: users and txs
+                    // Merge in important lists so clients stay consistent: users, txs, listings, rights
                     if (Array.isArray(data.state.users)) state.users = data.state.users;
                     if (Array.isArray(data.state.txs)) state.txs = data.state.txs;
+                    if (Array.isArray(data.state.listings)) state.listings = data.state.listings;
+                    if (Array.isArray(data.state.rights)) state.rights = data.state.rights;
                     // Also pick up a few small authoritative fields if present
                     if (data.state.jackpotUserId) state.jackpotUserId = data.state.jackpotUserId;
                     if (data.state.lastRealUserId) state.lastRealUserId = data.state.lastRealUserId;
