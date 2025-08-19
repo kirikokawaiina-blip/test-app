@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>trpg鯖 トークン | Cloudflare同期版 v16 (KV-poll)</title>
+    <title>trpg鯖 トークン | Cloudflare同期版 v17 (KV-poll)</title>
     <meta name="description" content="Cloudflare Workers + KV を使ったルーム同期（無料プラン対応）。"/>
     <style>body {
         margin: 0;
@@ -1251,7 +1251,9 @@
                     pendingOperations = pendingOperations.filter(op => !processedIds.has(op.id));
                 }
 
-                if (data.state && data.lastUpdate && data.lastUpdate > (lastSyncTime || 0)) {
+                // Merge authoritative lists when server state is newer OR when server returned processedOps
+                // (some server responses may include processedOps without bumping lastUpdate; handle both)
+                if (data.state && ((data.lastUpdate && data.lastUpdate > (lastSyncTime || 0)) || (Array.isArray(data.processedOps) && data.processedOps.length))) {
                     const keep = state.currentUserId;
                     // Merge in important lists so clients stay consistent: users, txs, listings, rights
                     if (Array.isArray(data.state.users)) state.users = data.state.users;
