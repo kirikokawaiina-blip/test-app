@@ -711,11 +711,13 @@
 
         // 既存scriptの同期関連部分を以下で置き換え
         // 操作キュー方式：クライアントは操作をキューに入れ、PUT /state に operations 配列を送る
-        let pendingOperations = []; // 送信待ちの操作
-        let lastSyncTime = 0; // サーバー側の lastUpdate を記録
-        let operationQueue = []; // 操作キュー（履歴的に残す）
-        let isSyncing = false;
-        let syncPollTimer = null;
+    let pendingOperations = []; // 送信待ちの操作
+    let lastSyncTime = 0; // サーバー側の lastUpdate を記録
+    let operationQueue = []; // 操作キュー（履歴的に残す）
+    let isSyncing = false;
+    // Separate timers: one for pushing pending ops, one for fetching latest state
+    let pushTimer = null;
+    let fetchTimer = null;
         // Applied operation ids to avoid double-applying from BroadcastChannel + server
         const appliedOpIds = new Set();
 
@@ -723,7 +725,7 @@
         let bc = null;
         try {
             bc = new BroadcastChannel('trpg_sync');
-            bc.addEventListener('message', (event) => {
+        bc.addEventListener('message', (event) => {
                 const msg = event.data || {};
                 if (!msg || !msg.type) return;
                 // ignore own tab's messages
@@ -737,6 +739,9 @@
                         applyOperationLocally(msg.operation);
                     } catch (e) { console.error('BC apply error', e); }
                     renderAll();
+            // Try to fetch latest from server so users/txs and authoritative state propagate quickly
+            // (no-op if sync not configured)
+            kvFetchLatest().catch(() => {});
                 }
             });
         } catch (e) {
@@ -1248,7 +1253,13 @@
 
                 if (data.state && data.lastUpdate && data.lastUpdate > (lastSyncTime || 0)) {
                     const keep = state.currentUserId;
-                    state = data.state;
+                    // Merge in important lists so clients stay consistent: users and txs
+                    if (Array.isArray(data.state.users)) state.users = data.state.users;
+                    if (Array.isArray(data.state.txs)) state.txs = data.state.txs;
+                    // Also pick up a few small authoritative fields if present
+                    if (data.state.jackpotUserId) state.jackpotUserId = data.state.jackpotUserId;
+                    if (data.state.lastRealUserId) state.lastRealUserId = data.state.lastRealUserId;
+                    state.vTick = typeof data.state.vTick === 'number' ? data.state.vTick : state.vTick;
                     state.currentUserId = keep || null;
                     saveLocal(true);
                     renderAll();
@@ -2177,9 +2188,9 @@
         els.btnConnect.addEventListener('click', () => {
             saveSyncSettings();
             // toggle queue-based KV sync
-            if (syncPollTimer) {
-                clearInterval(syncPollTimer);
-                syncPollTimer = null;
+            if (pushTimer || fetchTimer) {
+                if (pushTimer) { clearInterval(pushTimer); pushTimer = null; }
+                if (fetchTimer) { clearInterval(fetchTimer); fetchTimer = null; }
                 els.syncStatus.textContent = '停止中';
                 toast('同期を停止しました');
             } else {
@@ -2187,9 +2198,12 @@
                     // start periodic push + fetch loop
                     // push pending ops every 2s, fetch latest every 3s
                     kvFetchLatest();
-                    syncPollTimer = setInterval(() => {
-                        // push first, then fetch
+                    if (pushTimer) clearInterval(pushTimer);
+                    if (fetchTimer) clearInterval(fetchTimer);
+                    pushTimer = setInterval(() => {
                         kvPushState().catch(e => console.error('kvPushState err', e));
+                    }, 2000);
+                    fetchTimer = setInterval(() => {
                         kvFetchLatest().catch(e => console.error('kvFetchLatest err', e));
                     }, 3000);
                     els.syncStatus.textContent = '同期中';
@@ -2199,7 +2213,14 @@
                 }
             }
         });
-        els.btnSyncNow.addEventListener('click', () => kvFetchLatest());
+        els.btnSyncNow.addEventListener('click', async () => {
+            try {
+                await kvPushState();
+            } catch (e) { console.error('manual push err', e); }
+            try {
+                await kvFetchLatest();
+            } catch (e) { console.error('manual fetch err', e); }
+        });
         loadLocal();
         ensureJackpotUser();
         state.listings.forEach(l => {
