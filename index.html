@@ -55,11 +55,12 @@
     }
 
     .grid {
-        max-width: 1200px;
+        max-width: 1260px;
         margin: 16px auto 40px;
         padding: 0 14px;
         display: grid;
-        grid-template-columns:330px 1fr 340px;
+        /* make right panel a bit wider and left slightly narrower for balance */
+        grid-template-columns:300px 1fr 380px;
         gap: 14px
     }
 
@@ -181,9 +182,14 @@
       margin: 0;
     }
     .card .bd {
-      font-size: 13px;
+            font-size: 13px;
       line-height: 1.5;
     }
+
+        /* compact mode for right log panel */
+        .card.compact .bd { font-size: 12px; line-height: 1.3; }
+        .card.compact .bd .table table td, .card.compact .bd .table table th { padding: 6px 8px; }
+        .card.compact .bd .table { max-height: 340px !important; }
     .tabbar{display:flex; gap:6px}
         .tabbar .tab{
             font-weight:700; padding:6px 10px; border-radius:999px; cursor:pointer;
@@ -566,6 +572,7 @@
                     <option value="">すべて</option>
                 </select>
                     <div id="lastActivity" class="chip">最終更新：—</div>
+                    <button id="compactLogBtn" class="btn secondary" style="margin-left:8px">ログ: コンパクト</button>
                 </div>
             </div>
             <div class="bd">
@@ -2302,9 +2309,20 @@
                 const leftRect = leftCard.getBoundingClientRect();
                 // compute available height relative to viewport, allow a small padding
                 const available = Math.max(200, leftRect.height - 24);
-                document.querySelectorAll('.card .bd .table').forEach(t => {
-                    t.style.maxHeight = available + 'px';
+                // center panel should scroll earlier so give it slightly less height
+                document.querySelectorAll('.grid section.card').forEach((card, idx) => {
+                    const t = card.querySelector('.bd .table');
+                    if (!t) return;
+                    if (idx === 1) {
+                        // center panel - slightly shorter to force earlier scroll
+                        t.style.maxHeight = Math.max(160, available - 80) + 'px';
+                    } else {
+                        t.style.maxHeight = available + 'px';
+                    }
                 });
+                // make history table container allow slightly wider content
+                const historyTbl = document.querySelector('#tab-history .table') || document.querySelector('#tab-market .table') || document.querySelector('.grid section.card:nth-child(3) .bd .table');
+                if (historyTbl) historyTbl.style.minWidth = '320px';
             } catch (e) {
                 console.warn('adjustCardTableHeights error', e);
             }
@@ -2326,6 +2344,29 @@
         });
         loadLocal();
         ensureJackpotUser();
+        // compact log toggle init
+        try {
+            const compactKey = 'trpg_log_compact_v1';
+            const btn = document.getElementById('compactLogBtn');
+            const rightCard = document.querySelectorAll('.grid section.card')[2];
+            const applyCompact = (on) => {
+                if (!rightCard) return;
+                if (on) rightCard.classList.add('compact'); else rightCard.classList.remove('compact');
+                setTimeout(adjustCardTableHeights, 60);
+            };
+            if (btn) {
+                const cur = localStorage.getItem(compactKey) === '1';
+                applyCompact(cur);
+                btn.textContent = cur ? 'ログ: 標準表示' : 'ログ: コンパクト';
+                btn.addEventListener('click', () => {
+                    const now = localStorage.getItem(compactKey) === '1';
+                    localStorage.setItem(compactKey, now ? '0' : '1');
+                    applyCompact(!now);
+                    btn.textContent = !now ? 'ログ: 標準表示' : 'ログ: コンパクト';
+                    toast('ログ表示を切替ました');
+                });
+            }
+        } catch (e) { console.warn('compact init failed', e); }
         state.listings.forEach(l => {
             if (typeof l.qty !== 'number') l.qty = 1;
             if (typeof l.sold !== 'number') l.sold = 0;
