@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>trpg鯖 トークン | Cloudflare同期版 v17 (KV-poll)</title>
+    <title>trpg鯖 トークン | Cloudflare同期版 v14 (KV-poll)</title>
     <meta name="description" content="Cloudflare Workers + KV を使ったルーム同期（無料プラン対応）。"/>
     <style>body {
         margin: 0;
@@ -372,10 +372,48 @@
 
   /* Ensure main content doesn't sit under the fixed top panel */
   main, .container { padding-top: 56px !important; }
+  
+    /* Card-level vertical scrolling for long lists (market & rights) */
+    #market-list .table, #tab-myrights .table {
+        max-height: 420px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+    #market-list .table::-webkit-scrollbar, #tab-myrights .table::-webkit-scrollbar { display: none; height: 0; width: 0; }
+</style>
+
+<!-- Layout settings panel styles -->
+<style>
+    #layoutSettings {
+        position: fixed; left: 14px; top: 10px; z-index: 80; background: rgba(6,12,26,.9);
+        border:1px solid rgba(96,239,255,.12); padding:8px 10px; border-radius:10px; width:280px;
+        display:flex; flex-direction:column; gap:8px; backdrop-filter: blur(6px);
+    }
+    #layoutSettings h4 { margin:0; font-size:13px; color:var(--muted); }
+    .layout-row{display:flex;gap:8px;align-items:center}
+    .layout-row label{width:84px;font-size:12px;color:var(--muted)}
+    .layout-row input[type=range]{flex:1}
+    .layout-row input[type=number]{width:56px}
+    #layoutPresets{display:flex;gap:6px}
+    #layoutSettings .small{font-size:11px;color:var(--muted)}
 </style>
 
 </head>
 <body>
+<div id="layoutSettings">
+    <h4>レイアウト設定</h4>
+    <div class="layout-row"><label>左幅</label><input id="leftWidth" type="range" min="200" max="600" value="280"><input id="leftWidthNum" type="number" min="200" max="800" value="280"></div>
+    <div class="layout-row"><label>中央幅</label><input id="centerWidth" type="range" min="320" max="960" value="320"><input id="centerWidthNum" type="number" min="240" max="1200" value="320"></div>
+    <div class="layout-row"><label>右幅</label><input id="rightWidth" type="range" min="200" max="600" value="280"><input id="rightWidthNum" type="number" min="200" max="800" value="280"></div>
+    <div id="layoutPresets">
+        <button class="btn secondary" id="presetCompact">コンパクト</button>
+        <button class="btn secondary" id="presetWide">ワイド</button>
+        <button class="btn secondary" id="resetLayout">リセット</button>
+    </div>
+    <div class="small">設定はこのブラウザに保存されます</div>
+</div>
 <header>
     <div class="nav">
         <div style="display:flex;gap:10px;align-items:center">
@@ -1270,8 +1308,8 @@
                     els.lastSyncChip.textContent = '最終同期：受信 ' + new Date().toLocaleTimeString();
                     lastSyncTime = data.lastUpdate || Date.now();
                 }
-                // server-side immediate notify: new users / new txs created by other clients
-                if (data.notify && (Array.isArray(data.notify.newUsers) || Array.isArray(data.notify.newTxs))) {
+                // server-side immediate notify: new users / new txs / rights / listing updates created by other clients
+                if (data.notify && (Array.isArray(data.notify.newUsers) || Array.isArray(data.notify.newTxs) || Array.isArray(data.notify.newRights) || Array.isArray(data.notify.updatedListings) || Array.isArray(data.notify.deletedListings))) {
                     // merge new users (avoid duplicates)
                     if (Array.isArray(data.notify.newUsers) && data.notify.newUsers.length) {
                         for (const u of data.notify.newUsers) {
@@ -1284,6 +1322,26 @@
                     if (Array.isArray(data.notify.newTxs) && data.notify.newTxs.length) {
                         for (const t of data.notify.newTxs) {
                             if (!state.txs.some(x => x.id === t.id)) state.txs.unshift(t);
+                        }
+                    }
+                    // merge new rights
+                    if (Array.isArray(data.notify.newRights) && data.notify.newRights.length) {
+                        for (const r of data.notify.newRights) {
+                            if (!state.rights.some(x => x.id === r.id)) state.rights.unshift(r);
+                        }
+                    }
+                    // merge updated listings by id
+                    if (Array.isArray(data.notify.updatedListings) && data.notify.updatedListings.length) {
+                        for (const up of data.notify.updatedListings) {
+                            const idx = state.listings.findIndex(x => x.id === up.id);
+                            if (idx !== -1) state.listings[idx] = up; else state.listings.unshift(up);
+                        }
+                    }
+                    // remove deleted listings
+                    if (Array.isArray(data.notify.deletedListings) && data.notify.deletedListings.length) {
+                        for (const delId of data.notify.deletedListings) {
+                            const idx = state.listings.findIndex(x => x.id === delId);
+                            if (idx !== -1) state.listings.splice(idx, 1);
                         }
                     }
                     renderAll();
@@ -1362,6 +1420,88 @@
             state.vTick = (state.vTick || 0) + 1;
         }
 
+        // --- Layout settings (persisted per-browser) ---
+        const LAYOUT_KEY = 'trpg_layout_prefs_v1';
+
+        function loadLayoutPrefs() {
+            try {
+                const raw = localStorage.getItem(LAYOUT_KEY);
+                if (!raw) return null;
+                return JSON.parse(raw);
+            } catch (e) { return null; }
+        }
+
+        function saveLayoutPrefs(p) {
+            try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(p)); } catch (e) { console.warn('save layout failed', e); }
+        }
+
+        function applyLayoutPrefs(p) {
+            // p = {left, center, right} in px or null
+            const grid = document.querySelector('.grid');
+            if (!grid) return;
+            if (!p) return;
+            // build css grid-template-columns using fixed px when provided
+            const left = p.left || 280;
+            const center = p.center || 320;
+            const right = p.right || 280;
+            // responsive fallback: on small screens, collapse to single column
+            if (window.innerWidth < 900) {
+                grid.style.gridTemplateColumns = '1fr';
+            } else if (window.innerWidth < 1200) {
+                grid.style.gridTemplateColumns = `minmax(200px, ${Math.max(180,left)}px) ${Math.max(240,center)}px`;
+            } else {
+                grid.style.gridTemplateColumns = `${left}px ${center}px ${right}px`;
+            }
+        }
+
+        function initLayoutControls() {
+            const left = document.getElementById('leftWidth');
+            const leftN = document.getElementById('leftWidthNum');
+            const center = document.getElementById('centerWidth');
+            const centerN = document.getElementById('centerWidthNum');
+            const right = document.getElementById('rightWidth');
+            const rightN = document.getElementById('rightWidthNum');
+            const presetCompact = document.getElementById('presetCompact');
+            const presetWide = document.getElementById('presetWide');
+            const resetBtn = document.getElementById('resetLayout');
+
+            function bindRange(range, num) {
+                range.addEventListener('input', () => { num.value = range.value; applyFromInputs(); });
+                num.addEventListener('input', () => { range.value = num.value; applyFromInputs(); });
+            }
+
+            bindRange(left, leftN); bindRange(center, centerN); bindRange(right, rightN);
+
+            function applyFromInputs() {
+                const p = { left: Number(left.value), center: Number(center.value), right: Number(right.value) };
+                applyLayoutPrefs(p);
+                saveLayoutPrefs(p);
+            }
+
+            presetCompact.addEventListener('click', () => {
+                left.value = 240; leftN.value = 240; center.value = 360; centerN.value = 360; right.value = 240; rightN.value = 240; applyFromInputs();
+            });
+            presetWide.addEventListener('click', () => {
+                left.value = 320; leftN.value = 320; center.value = 520; centerN.value = 520; right.value = 320; rightN.value = 320; applyFromInputs();
+            });
+            resetBtn.addEventListener('click', () => {
+                localStorage.removeItem(LAYOUT_KEY);
+                const def = {left:280, center:320, right:280};
+                left.value = def.left; leftN.value = def.left; center.value = def.center; centerN.value = def.center; right.value = def.right; rightN.value = def.right;
+                applyLayoutPrefs(def);
+            });
+
+            // load saved
+            const saved = loadLayoutPrefs();
+            const def = saved || {left:280, center:320, right:280};
+            left.value = def.left; leftN.value = def.left; center.value = def.center; centerN.value = def.center; right.value = def.right; rightN.value = def.right;
+            applyLayoutPrefs(def);
+
+            // react to window resize to reapply responsive rule
+            window.addEventListener('resize', () => applyLayoutPrefs(loadLayoutPrefs() || def));
+        }
+
+
     // duplicate register removed — registration is handled earlier via createOperation + queueOperation
 
         async function login(name, pass) {
@@ -1387,6 +1527,22 @@
             renderAll();
             // sync client removed: subsequent operations will use state.currentUserId
             toast('ログイン');
+            // Remind user about any unfinalized executions (buyer or seller side)
+            try {
+                remindUnfinalizedExecutions(state.currentUserId);
+            } catch (e) { console.warn('remind error', e); }
+        }
+
+        function remindUnfinalizedExecutions(userId) {
+            if (!userId) return;
+            const buyerPending = state.rights.filter(r => r.buyerId === userId && r.status && r.status !== 'finalized');
+            const sellerRequests = state.rights.filter(r => r.sellerId === userId && r.status === 'request');
+            if (buyerPending.length) {
+                toast(`未確定の実行が ${buyerPending.length} 件あります。履歴または権利一覧を確認してください`);
+            }
+            if (sellerRequests.length) {
+                toast(`対応待ちの実行申請が ${sellerRequests.length} 件あります。権利一覧で応答してください`);
+            }
         }
 
         function logout() {
@@ -1640,118 +1796,59 @@
                 toast('申請できません');
                 return;
             }
+            // optimistic
             r.status = 'request';
-            addTx({
-                type: 'execute-request',
-                from: r.buyerId,
-                to: r.sellerId,
-                listingId: r.listingId,
-                title: r.title,
-                memo: '実行申請'
-            });
+            addTx({ type: 'execute-request', from: r.buyerId, to: r.sellerId, listingId: r.listingId, title: r.title, memo: '実行申請', pending: true });
             bump();
             saveLocal();
             renderAll();
+            const op = createOperation('buyer_request', { rightId });
+            queueOperation(op);
         }
 
         function sellerRespond(rightId, action) {
             const me = currentUser();
-            if (!me) {
-                toast('ログインが必要');
-                return;
-            }
+            if (!me) { toast('ログインが必要'); return; }
             const r = state.rights.find(x => x.id === rightId);
             if (!r) return;
-            if (r.sellerId !== me.id || r.status !== 'request') {
-                toast('対象外');
-                return;
-            }
+            if (r.sellerId !== me.id || r.status !== 'request') { toast('対象外'); return; }
             const l = state.listings.find(x => x.id === r.listingId);
+            // optimistic
             if (action === 'exec') {
                 r.status = 'seller_executed';
-                addTx({
-                    type: 'execute-done',
-                    from: r.sellerId,
-                    to: r.buyerId,
-                    listingId: r.listingId,
-                    title: r.title,
-                    memo: '販売者が実行'
-                });
+                addTx({ type: 'execute-done', from: r.sellerId, to: r.buyerId, listingId: r.listingId, title: r.title, memo: '販売者が実行', pending: true });
             } else {
                 const seller = findUserById(r.sellerId);
-                if (seller.balance < l.price) {
-                    toast('残額不足');
-                    return;
-                }
+                if (seller.balance < l.price) { toast('残額不足'); return; }
                 r.status = 'seller_cancel_requested';
-                addTx({
-                    type: 'execute-cancel-ask',
-                    from: r.sellerId,
-                    to: r.buyerId,
-                    listingId: r.listingId,
-                    title: r.title,
-                    memo: '販売者がキャンセル申請'
-                });
+                addTx({ type: 'execute-cancel-ask', from: r.sellerId, to: r.buyerId, listingId: r.listingId, title: r.title, memo: '販売者がキャンセル申請', pending: true });
             }
-            bump();
-            saveLocal();
-            renderAll();
+            bump(); saveLocal(); renderAll();
+            const op = createOperation('seller_respond', { rightId, action });
+            queueOperation(op);
         }
 
         function buyerFinalize(rightId) {
             const me = currentUser();
-            if (!me) {
-                toast('ログインが必要');
-                return;
-            }
+            if (!me) { toast('ログインが必要'); return; }
             const r = state.rights.find(x => x.id === rightId);
-            if (!r) return;
-            if (r.buyerId !== me.id) {
-                toast('あなたは購入者ではありません');
-                return;
-            }
+            if (!r) return; if (r.buyerId !== me.id) { toast('あなたは購入者ではありません'); return; }
             const l = state.listings.find(x => x.id === r.listingId);
+            // optimistic
             if (r.status === 'seller_executed') {
-                r.status = 'finalized';
-                r.executed = true;
-                addTx({
-                    type: 'execute-finalize',
-                    from: r.buyerId,
-                    to: r.sellerId,
-                    listingId: r.listingId,
-                    title: r.title,
-                    memo: '購入者が実行確認（確定）'
-                });
+                r.status = 'finalized'; r.executed = true;
+                addTx({ type: 'execute-finalize', from: r.buyerId, to: r.sellerId, listingId: r.listingId, title: r.title, memo: '購入者が実行確認（確定）', pending: true });
             } else if (r.status === 'seller_cancel_requested') {
-                const seller = findUserById(r.sellerId);
-                const buyer = findUserById(r.buyerId);
-                if (seller.balance < l.price) {
-                    toast('販売者の残高不足');
-                    return;
-                }
-                seller.balance -= l.price;
-                buyer.balance += l.price;
-                l.sold = Math.max(0, (l.sold || 0) - 1);
-                if (l.sold < l.qty) {
-                    l.active = true;
-                }
+                const seller = findUserById(r.sellerId); const buyer = findUserById(r.buyerId);
+                if (seller.balance < l.price) { toast('販売者の残高不足'); return; }
+                seller.balance -= l.price; buyer.balance += l.price; l.sold = Math.max(0, (l.sold || 0) - 1);
+                if (l.sold < l.qty) l.active = true;
                 state.rights = state.rights.filter(x => x.id !== rightId);
-                addTx({
-                    type: 'execute-cancel-ok',
-                    from: r.buyerId,
-                    to: r.sellerId,
-                    listingId: r.listingId,
-                    title: r.title,
-                    amount: l.price,
-                    memo: 'キャンセル返金（全額）確定'
-                });
-            } else {
-                toast('確定不可の状態');
-                return;
-            }
-            bump();
-            saveLocal();
-            renderAll();
+                addTx({ type: 'execute-cancel-ok', from: r.buyerId, to: r.sellerId, listingId: r.listingId, title: r.title, amount: l.price, memo: 'キャンセル返金（全額）確定', pending: true });
+            } else { toast('確定不可の状態'); return; }
+            bump(); saveLocal(); renderAll();
+            const op = createOperation('buyer_finalize', { rightId });
+            queueOperation(op);
         }
 
         const MORNING_HOUR = 7, MORNING_MINUTE = 30, MORNING_BASE = 1000, STREAK_MAX = 30, STREAK_INC = 100;
@@ -2109,6 +2206,8 @@
         });
         els.searchInput.addEventListener('input', renderHistory);
         els.memberFilter.addEventListener('change', renderHistory);
+    // initialize layout controls (apply saved prefs)
+    try { initLayoutControls(); } catch (e) { console.warn('initLayoutControls failed', e); }
         // Server-side export/import
         async function fetchExport() {
             if (!syncSettings.url || !syncSettings.room || !syncSettings.key) {
