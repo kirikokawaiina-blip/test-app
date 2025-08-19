@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>trpg鯖 トークン | Cloudflare同期版 v14 (KV-poll)</title>
+    <title>trpg鯖 トークン | Cloudflare同期版 v15 (KV-poll)</title>
     <meta name="description" content="Cloudflare Workers + KV を使ったルーム同期（無料プラン対応）。"/>
     <style>body {
         margin: 0;
@@ -1266,6 +1266,24 @@
                     els.lastSyncChip.textContent = '最終同期：受信 ' + new Date().toLocaleTimeString();
                     lastSyncTime = data.lastUpdate || Date.now();
                 }
+                // server-side immediate notify: new users / new txs created by other clients
+                if (data.notify && (Array.isArray(data.notify.newUsers) || Array.isArray(data.notify.newTxs))) {
+                    // merge new users (avoid duplicates)
+                    if (Array.isArray(data.notify.newUsers) && data.notify.newUsers.length) {
+                        for (const u of data.notify.newUsers) {
+                            if (!state.users.some(x => x.id === u.id)) state.users.push(u);
+                        }
+                        // sort by insertion order (optional)
+                        state.users.sort((a,b) => (a.ts||0) - (b.ts||0));
+                    }
+                    // merge new txs at head
+                    if (Array.isArray(data.notify.newTxs) && data.notify.newTxs.length) {
+                        for (const t of data.notify.newTxs) {
+                            if (!state.txs.some(x => x.id === t.id)) state.txs.unshift(t);
+                        }
+                    }
+                    renderAll();
+                }
 
                 if (data.conflicts && data.conflicts.length) {
                     handleConflicts(data.conflicts);
@@ -1340,32 +1358,7 @@
             state.vTick = (state.vTick || 0) + 1;
         }
 
-        async function register(name, pass) {
-            name = (name || '').trim();
-            if (!name || !pass) {
-                toast('ユーザー名とパスワードを入力');
-                return;
-            }
-            if (name === JACKPOT_NAME) {
-                toast('この名前は予約されています');
-                return;
-            }
-            if (state.users.some(u => u.name === name)) {
-                toast('そのユーザー名は使用済み');
-                return;
-            }
-            const passHash = await sha256(pass);
-            const u = {id: id(), name, passHash, balance: INITIAL_BAL, streakCount: 0, lastMorningDate: ''};
-            state.users.push(u);
-            state.currentUserId = u.id;
-            state.lastRealUserId = u.id;
-            addTx({type: 'mint', to: u.id, amount: INITIAL_BAL, memo: '初期発行'});
-            bump();
-            saveLocal();
-            renderAll();
-            // sync client removed: registration will be pushed via operation queue
-            toast('登録完了');
-        }
+    // duplicate register removed — registration is handled earlier via createOperation + queueOperation
 
         async function login(name, pass) {
             name = (name || '').trim();
