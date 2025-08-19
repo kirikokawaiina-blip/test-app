@@ -656,28 +656,26 @@
             setTimeout(() => div.remove(), 2500);
         }
 
-        function saveLocal(skipPush) {
-            localStorage.setItem(LS_KEY, JSON.stringify(state));
-            if (!skipPush) schedulePush();
+        // Persist only minimal local session info (currentUserId). Full state lives on server.
+        function saveLocal() {
+            try {
+                localStorage.setItem('last_current_uid', state.currentUserId || '');
+            } catch (e) {
+                console.warn('saveLocal failed', e);
+            }
         }
 
-        // Debounced push to kv endpoint (legacy PUT-based sync). Keep small and safe.
-        let _scheduleTimer = null;
-        function schedulePush(delay = 300) {
-            if (_scheduleTimer) clearTimeout(_scheduleTimer);
-            _scheduleTimer = setTimeout(() => {
-                _scheduleTimer = null;
-                kvPushState().catch(e => console.error('kvPushState error', e));
-            }, delay);
+        // In server-side mode we don't schedule local pushes; operations are sent immediately.
+        function schedulePush() {
+            // no-op (kept for compatibility)
         }
 
         function loadLocal() {
             try {
-                const raw = localStorage.getItem(LS_KEY);
-                if (raw) {
-                    state = JSON.parse(raw)
-                }
+                const last = localStorage.getItem('last_current_uid');
+                if (last) state.currentUserId = last || null;
             } catch (e) {
+                console.warn('loadLocal failed', e);
             }
             if (typeof state.vTick !== 'number') state.vTick = 0;
         }
@@ -711,364 +709,580 @@
             localStorage.setItem(syncStoreKey, JSON.stringify(syncSettings));
         }
 
-        // 操作ベースの同期システム
-        class OperationBasedSync {
-            constructor(serverUrl, roomId, userId) {
-                this.serverUrl = serverUrl.replace(/\/+$/,'');
-                this.roomId = roomId;
-                this.userId = userId || 'anonymous';
-                this.lastOperationId = 0;
-                this.pollInterval = null;
-                this.pendingOperations = new Set();
-                this.onStateChanged = null;
-                this._pollRunning = false;
-            }
+        // 既存scriptの同期関連部分を以下で置き換え
+        // 操作キュー方式：クライアントは操作をキューに入れ、PUT /state に operations 配列を送る
+        let pendingOperations = []; // 送信待ちの操作
+        let lastSyncTime = 0; // サーバー側の lastUpdate を記録
+        let operationQueue = []; // 操作キュー（履歴的に残す）
+        let isSyncing = false;
+        let syncPollTimer = null;
+        // Applied operation ids to avoid double-applying from BroadcastChannel + server
+        const appliedOpIds = new Set();
 
-            async sendOperation(operation) {
-                const opId = operation.opId || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-                const payload = {
-                    userId: this.userId,
-                    operation: {
-                        ...operation,
-                        opId,
-                        timestamp: Date.now()
-                    }
-                };
+        // BroadcastChannel for intra-browser-tab communication
+        let bc = null;
+        try {
+            bc = new BroadcastChannel('trpg_sync');
+            bc.addEventListener('message', (event) => {
+                const msg = event.data || {};
+                if (!msg || !msg.type) return;
+                // ignore own tab's messages
+                if (msg.sessionId === getSessionId()) return;
 
-                try {
-                    const res = await fetch(`${this.serverUrl}/operations?room=${this.roomId}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-
-                    const txt = await res.text();
-                    let data = null;
-                    try { data = txt ? JSON.parse(txt) : null; } catch (e) { /* non-json */ }
-
-                    if (!res.ok) {
-                        console.error('sendOperation failed', res.status, txt);
-                        // if server returned a latest state, reconcile
-                        if (data && data.newState) {
-                            const keep = state.currentUserId;
-                            state = data.newState;
-                            state.currentUserId = keep || null;
-                            saveLocal(true);
-                            renderAll();
-                        }
-                        return null;
-                    }
-
-                    // success
-                    if (data && data.operationId) {
-                        this.pendingOperations.add(opId);
-                        return data.operationId;
-                    }
-                    // fallback
-                    this.pendingOperations.add(opId);
-                    return null;
-                } catch (err) {
-                    console.error('sendOperation error', err);
-                    return null;
-                }
-            }
-
-            async sendBatchOperations(opsArray) {
-                const payload = {
-                    userId: this.userId,
-                    operation: { type: 'BATCH', operations: opsArray.map(o => ({ ...o, opId: o.opId || `${Date.now()}-${Math.random().toString(36).slice(2)}`, timestamp: Date.now() })) }
-                };
-                try {
-                    const res = await fetch(`${this.serverUrl}/operations?room=${this.roomId}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    if (!res.ok) {
-                        console.error('sendBatchOperations failed', res.status);
-                        return null;
-                    }
-                    const data = await res.json();
-                    return data;
-                } catch (err) {
-                    console.error('sendBatchOperations error', err);
-                    return null;
-                }
-            }
-
-            async pollOperations() {
-                try {
-                    const url = `${this.serverUrl}/operations?room=${this.roomId}&since=${this.lastOpId || 0}`;
-                    const res = await fetch(url, { method: 'GET' });
-
-                    // If server signals no content, stop quietly
-                    if (res.status === 204) {
-                        return;
-                    }
-
-                    // Read as text first and attempt to parse JSON.
-                    const text = await res.text();
-                    if (!text) return;
-
-                    let data;
+                if (msg.type === 'operation_queued' && msg.operation) {
+                    // Prevent applying same op twice
+                    if (appliedOpIds.has(msg.operation.id)) return;
+                    appliedOpIds.add(msg.operation.id);
                     try {
-                      data = JSON.parse(text);
-                    } catch (e) {
-                      console.error('pollOperations: invalid JSON from server', e, 'raw:', text);
-                      return; // ignore this poll result
-                    }
-
-                    if (!data || !Array.isArray(data.operations)) return;
-
-                    for (const op of data.operations) {
-                      if (this.pendingOperations && this.pendingOperations.has(op.opId)) {
-                        // This was originated locally and already applied; remove echo
-                        this.pendingOperations.delete(op.opId);
-                        continue;
-                      }
-                      try {
-                        this.applyOperation(op);
-                      } catch (e) {
-                        console.error('applyOperation error', e, op);
-                      }
-                      this.lastOpId = Math.max(this.lastOpId || 0, op.id || 0);
-                    }
-
-                    // update UI status if available
-                    try { if (els && els.syncStatus) els.syncStatus.textContent = `synced @ ${new Date().toLocaleTimeString()}`; } catch(e){}
-                } catch (e) {
-                    console.error('pollOperations error', e);
+                        applyOperationLocally(msg.operation);
+                    } catch (e) { console.error('BC apply error', e); }
+                    renderAll();
                 }
-            }
+            });
+        } catch (e) {
+            console.warn('BroadcastChannel not available', e);
+            bc = null;
+        }
 
-            async syncFullState() {
-              try {
-                const url = `${this.serverUrl}/operations?room=${this.roomId}&since=0`;
-                const res = await fetch(url, { method: 'GET' });
-                if (res.status === 204) return;
-                const text = await res.text();
-                if (!text) return;
-                let data;
-                try { data = JSON.parse(text); } catch (e) {
-                  console.error('syncFullState: invalid JSON', e, 'raw:', text);
-                  return;
+        // 操作を生成する共通関数
+        function createOperation(type, data, userId = null) {
+            const operation = {
+                id: generateOperationId(),
+                type: type,
+                data: data,
+                timestamp: Date.now(), // ミリ秒単位のタイムスタンプ
+                userId: userId || state.currentUserId,
+                clientId: getClientId(), // クライアント識別用
+                sessionId: getSessionId() // タブ（セッション）識別用
+            };
+            
+            console.log('Creating operation:', operation);
+            return operation;
+        }
+
+        // タブ単位のセッションID（sessionStorage とは別に window プロパティで保持）
+        function getSessionId() {
+            if (window.__trpg_session_id) return window.__trpg_session_id;
+            const sid = 'session_' + Math.random().toString(36).slice(2) + '_' + Date.now();
+            window.__trpg_session_id = sid;
+            return sid;
+        }
+
+        function generateOperationId() {
+            return 'op_' + Math.random().toString(36).slice(2) + '_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        }
+
+        function getClientId() {
+            let clientId = localStorage.getItem('trpg_client_id');
+            if (!clientId) {
+                clientId = 'client_' + Math.random().toString(36).slice(2) + '_' + Date.now();
+                localStorage.setItem('trpg_client_id', clientId);
+            }
+            return clientId;
+        }
+
+        // 操作をキューに追加
+        function queueOperation(operation) {
+            operationQueue.push(operation);
+            pendingOperations.push(operation);
+            
+            // Broadcast to other tabs so they can optimistic-update too
+            try {
+                if (bc) bc.postMessage({ type: 'operation_queued', operation: operation, sessionId: getSessionId() });
+            } catch (e) { console.warn('BC post failed', e); }
+
+            // In server-side mode, send operation immediately and update UI from server response
+            appliedOpIds.add(operation.id);
+            // show optimistic indicator locally, but do not persist full state locally
+            applyOperationLocally(operation);
+            sendOperationsToServer([operation]).catch(e => {
+                console.error('sendOperationsToServer error', e);
+                toast('操作の送信に失敗しました');
+            });
+        }
+
+        // Immediately send operations to server and apply returned newState
+        async function sendOperationsToServer(ops) {
+            if (!syncSettings.url || !syncSettings.room || !syncSettings.key) {
+                // no server configured
+                return { ok: false, error: 'no sync configured' };
+            }
+            const u = new URL(syncSettings.url);
+            u.searchParams.set('room', syncSettings.room);
+            u.searchParams.set('key', syncSettings.key);
+
+            try {
+                const res = await fetch(u.toString(), { method: 'PUT', headers: {'content-type':'application/json'}, body: JSON.stringify({ operations: ops }) });
+                if (!res.ok) {
+                    const txt = await res.text().catch(() => '');
+                    return { ok: false, error: txt || res.status };
                 }
-                if (!data || !Array.isArray(data.operations)) return;
-                for (const op of data.operations) {
-                  if (this.pendingOperations && this.pendingOperations.has(op.opId)) {
-                    this.pendingOperations.delete(op.opId);
-                    continue;
-                  }
-                  try { this.applyOperation(op); } catch (e) { console.error('syncFullState apply error', e, op); }
-                  this.lastOpId = Math.max(this.lastOpId || 0, op.id || 0);
+                const data = await res.json().catch(() => null);
+                if (data && data.newState) {
+                    const keep = state.currentUserId;
+                    state = data.newState;
+                    state.currentUserId = keep || null;
+                    lastSyncTime = data.lastUpdate || Date.now();
+                    renderAll();
+                    saveLocal();
                 }
-                try { if (els && els.syncStatus) els.syncStatus.textContent = `synced @ ${new Date().toLocaleTimeString()}`; } catch(e){}
-              } catch (e) {
-                console.error('syncFullState error', e);
-              }
-            }
-
-            // replace startPolling with a poll loop that works well with long-polling
-            startPolling(interval = 1000) {
-              if (this._pollRunning) return;
-              this._pollRunning = true;
-              (async () => {
-                // initial full sync so late joiners get history
-                await this.syncFullState();
-
-                while (this._pollRunning) {
-                  try {
-                    await this.pollOperations();
-                  } catch (e) {
-                    console.error('poll loop error', e);
-                    // backoff before retrying
-                    await new Promise(r => setTimeout(r, interval));
-                  }
+                if (data && Array.isArray(data.processedOps)) {
+                    const processedIds = new Set(data.processedOps.map(p => p));
+                    pendingOperations = pendingOperations.filter(op => !processedIds.has(op.id));
                 }
-              })();
-              try { if (els && els.syncStatus) els.syncStatus.textContent = 'polling...'; } catch(e){}
-            }
-
-            stopPolling() {
-              this._pollRunning = false;
-              // keep compatibility with possible timer-based implementations
-              if (this.pollTimer) {
-                clearInterval(this.pollTimer);
-                this.pollTimer = null;
-              }
-            }
-
-            applyOperation(op) {
-                const operation = op.operation || {};
-                switch (operation.type) {
-                    case 'TRANSFER': {
-                        const from = findUserById(operation.fromId);
-                        const to = findUserById(operation.toId);
-                        if (!from || !to) return;
-                        if (from.balance < operation.amount) return;
-                        from.balance -= operation.amount;
-                        to.balance += operation.amount;
-                        addTx({ type: 'transfer', from: from.id, to: to.id, amount: operation.amount, memo: operation.memo || '' });
-                        bump();
-                        saveLocal(true);
-                        break;
-                    }
-
-                    case 'CREATE_LISTING': {
-                        const l = {
-                            id: operation.listingId || `listing_${Date.now()}_${Math.random().toString(36).substr(2,6)}`,
-                            title: operation.title,
-                            price: operation.price,
-                            desc: operation.desc || operation.description || '',
-                            sellerId: operation.sellerId || op.userId,
-                            active: true,
-                            ts: operation.timestamp || Date.now(),
-                            qty: operation.qty || 1,
-                            sold: 0
-                        };
-                        state.listings.unshift(l);
-                        bump();
-                        saveLocal(true);
-                        break;
-                    }
-
-                    case 'PURCHASE': {
-                        const buyer = findUserById(operation.buyerId);
-                        const listing = state.listings.find(x => x.id === operation.listingId && x.active);
-                        if (!buyer || !listing) return;
-                        if (buyer.balance < listing.price) return;
-                        const seller = findUserById(listing.sellerId);
-                        if (!seller) return;
-                        // fee to jackpot (existing logic uses 10%)
-                        const fee = Math.floor(listing.price * 0.10);
-                        const sellerReceive = listing.price - fee;
-                        const j = jackpotUser();
-                        buyer.balance -= listing.price;
-                        seller.balance += sellerReceive;
-                        if (j) j.balance += fee;
-                        listing.sold = (listing.sold || 0) + 1;
-                        if (listing.sold >= (listing.qty || 1)) listing.active = false;
-                        const right = { id: operation.rightId || `right_${Date.now()}_${Math.random().toString(36).substr(2,6)}`, listingId: listing.id, title: listing.title, buyerId: buyer.id, sellerId: seller.id, ts: Date.now(), status: 'owned', executed: false };
-                        state.rights.unshift(right);
-                        addTx({ type: 'purchase', from: buyer.id, to: seller.id, amount: listing.price, listingId: listing.id, title: listing.title, memo: '権利購入（手数料10%）' });
-                        addTx({ type: 'fee', from: seller.id, to: j ? j.id : 'jpot', amount: fee, listingId: listing.id, title: listing.title, memo: '販売手数料' });
-                        bump();
-                        saveLocal(true);
-                        break;
-                    }
-
-                    case 'SET_VALUE': {
-                        state[operation.key] = operation.value;
-                        bump();
-                        saveLocal(true);
-                        break;
-                    }
-
-                    case 'INCREMENT': {
-                        state[operation.key] = (state[operation.key] || 0) + operation.amount;
-                        bump();
-                        saveLocal(true);
-                        break;
-                    }
-
-                    case 'ADD_ITEM': {
-                        if (!state[operation.listKey]) state[operation.listKey] = [];
-                        state[operation.listKey].push(operation.item);
-                        bump();
-                        saveLocal(true);
-                        break;
-                    }
-
-                    case 'REMOVE_ITEM': {
-                        if (!state[operation.listKey]) return;
-                        const idx = state[operation.listKey].findIndex(i => i.id === operation.itemId);
-                        if (idx !== -1) state[operation.listKey].splice(idx,1);
-                        bump();
-                        saveLocal(true);
-                        break;
-                    }
-
-                    default:
-                        console.warn('Unknown operation type (client apply):', operation.type);
-                }
-            }
-
-            startPolling(interval = 1000) {
-                if (this.pollTimer) return;
-                // use a safe wrapper so unhandled rejections are logged
-                this.pollTimer = setInterval(() => {
-                  this.pollOperations().catch(e => console.error('pollOperations (interval) error', e));
-                }, interval);
-                try { if (els && els.syncStatus) els.syncStatus.textContent = 'polling...'; } catch(e){}
-            }
-
-            stopPolling() {
-                if (!this.pollInterval) return;
-                clearInterval(this.pollInterval);
-                this.pollInterval = null;
-                els.syncStatus.textContent = '停止中';
+                if (data && data.conflicts && data.conflicts.length) handleConflicts(data.conflicts);
+                return { ok: true, data };
+            } catch (e) {
+                console.error('sendOperationsToServer failed', e);
+                return { ok: false, error: e.message };
             }
         }
 
-        let sync = null;
+        // ローカルで操作を適用（楽観的更新） — 全操作はここで処理する
+        function applyOperationLocally(operation) {
+            console.log('Applying operation locally:', operation);
+            const { type, data, timestamp, userId } = operation;
 
+            switch (type) {
+                case 'transfer': {
+                    const from = findUserById(userId);
+                    const to = findUserById(data.toId);
+                    if (!from || !to) break;
+                    // 基本的に呼び出し元でバリデーション済みのはず
+                    from.balance = (from.balance || 0) - data.amount;
+                    to.balance = (to.balance || 0) + data.amount;
+                    addTx({ type: 'transfer', from: from.id, to: to.id, amount: data.amount, memo: data.memo || '', pending: true, ts: timestamp || Date.now() });
+                    break;
+                }
+
+                case 'buy_listing': {
+                    const listing = state.listings.find(l => l.id === data.listingId && l.active);
+                    const buyer = findUserById(userId);
+                    if (!listing || !buyer) break;
+                    const seller = findUserById(listing.sellerId);
+                    const fee = Math.floor(listing.price * 0.10);
+                    const sellerReceive = listing.price - fee;
+                    buyer.balance = (buyer.balance || 0) - listing.price;
+                    if (seller) seller.balance = (seller.balance || 0) + sellerReceive;
+                    const j = jackpotUser(); if (j) j.balance = (j.balance || 0) + fee;
+                    listing.sold = (listing.sold || 0) + 1;
+                    if (listing.sold >= (listing.qty || 1)) listing.active = false;
+                    const right = { id: id(), listingId: listing.id, title: listing.title, buyerId: buyer.id, sellerId: listing.sellerId, ts: timestamp || Date.now(), status: 'owned', executed: false, pending: true };
+                    state.rights.unshift(right);
+                    addTx({ type: 'purchase', from: buyer.id, to: listing.sellerId, amount: listing.price, listingId: listing.id, title: listing.title, memo: '権利購入（手数料10%）', pending: true, ts: timestamp || Date.now() });
+                    break;
+                }
+
+                case 'create_listing': {
+                    const l = {
+                        id: data.listingId || id(),
+                        title: data.title,
+                        price: data.price,
+                        desc: data.desc || '',
+                        sellerId: userId || state.currentUserId,
+                        active: true,
+                        ts: timestamp || Date.now(),
+                        qty: data.qty || 1,
+                        sold: 0,
+                        pending: true
+                    };
+                    state.listings.unshift(l);
+                    break;
+                }
+
+                case 'delete_listing': {
+                    const idx = state.listings.findIndex(x => x.id === data.listingId);
+                    if (idx !== -1) state.listings.splice(idx, 1);
+                    break;
+                }
+
+                case 'toggle_listing': {
+                    const l = state.listings.find(x => x.id === data.listingId);
+                    if (l) l.active = !l.active;
+                    break;
+                }
+
+                case 'register_user': {
+                    const { name, passHash } = data;
+                    if (state.users.some(u => u.name === name)) break;
+                    const newUser = { id: id(), name, passHash, balance: INITIAL_BAL, streakCount: 0, lastMorningDate: '', pending: true };
+                    state.users.push(newUser);
+                    break;
+                }
+
+                case 'morning_claim': {
+                    const me = findUserById(userId);
+                    if (!me) break;
+                    const today = data.date || ts2str(Date.now());
+                    if (me.lastMorningDate) {
+                        const diff = Math.round((new Date(today) - new Date(me.lastMorningDate)) / 86400000);
+                        me.streakCount = (diff === 1) ? Math.min((me.streakCount || 0) + 1, STREAK_MAX) : 1;
+                    } else {
+                        me.streakCount = 1;
+                    }
+                    me.lastMorningDate = today;
+                    const bonus = MORNING_BASE + STREAK_INC * (me.streakCount || 0);
+                    me.balance = (me.balance || 0) + bonus;
+                    addTx({ type: 'mint', to: me.id, amount: bonus, memo: `朝活（連続${me.streakCount}日）`, pending: true, ts: timestamp || Date.now() });
+                    break;
+                }
+
+                case 'roulette': {
+                    // クライアント側で楽観的に参加費を支払っている前提
+                    const me = findUserById(userId);
+                    const j = jackpotUser();
+                    if (!me || !j) break;
+                    // サーバー側で最終的な当選判定されるためここでは参加費のみ
+                    addTx({ type: 'jpot-fee', from: me.id, to: j.id, amount: 100, memo: 'ルーレット参加費', pending: true, ts: timestamp || Date.now() });
+                    break;
+                }
+
+                default:
+                    console.warn('Unknown operation type in applyOperationLocally:', type);
+            }
+
+            bump();
+            renderAll();
+        }
+
+        // 競合通知の簡易処理
+        function handleConflicts(conflicts) {
+            if (!Array.isArray(conflicts) || conflicts.length === 0) return;
+            state.conflicts = state.conflicts || [];
+            for (const c of conflicts) {
+                state.conflicts.push(c);
+                toast('競合検出: ' + (c.message || c.type || 'unknown'));
+            }
+            saveLocal(true);
+        }
+
+        // 修正された送金関数（既存の transfer をキュー方式へ差し替え）
+        async function transfer(toId, amount, memo) {
+            const from = currentUser();
+            if (!from) {
+                toast('ログインが必要');
+                return;
+            }
+            
+            amount = Math.floor(Number(amount));
+            if (!(amount > 0)) {
+                toast('金額は1以上の整数');
+                return;
+            }
+            
+            const to = findUserById(toId);
+            if (!to) {
+                toast('送信先が不正');
+                return;
+            }
+            
+            if (from.id === toId) {
+                toast('自分自身へは送れません');
+                return;
+            }
+            
+            if (from.balance < amount) {
+                toast('残高不足');
+                return;
+            }
+
+            // 操作をキューに追加
+            const operation = createOperation('transfer', {
+                toId: toId,
+                amount: amount,
+                memo: memo || ''
+            });
+            
+            queueOperation(operation);
+            
+            // ローカルで即座に実行（楽観的更新）
+            from.balance -= amount;
+            to.balance += amount;
+            addTx({
+                type: 'transfer',
+                from: from.id,
+                to: to.id,
+                amount,
+                memo: (memo || '').trim(),
+                pending: true // ペンディング状態をマーク
+            });
+            
+            saveLocal(true); // 同期はschedulePushで行う
+        }
+
+        // 出品購入の修正版
+        async function buyListing(listingId) {
+            const buyer = currentUser();
+            if (!buyer) {
+                toast('ログインが必要');
+                return;
+            }
+            
+            const listing = state.listings.find(x => x.id === listingId && x.active);
+            if (!listing) {
+                toast('出品が見つかりません');
+                return;
+            }
+
+            // 操作をキューに追加
+            const operation = createOperation('buy_listing', {
+                listingId: listingId
+            });
+            
+            queueOperation(operation);
+            
+            // ローカルで楽観的更新
+            const remaining = (listing.qty || 1) - (listing.sold || 0);
+            if (remaining > 0 && buyer.balance >= listing.price) {
+                const seller = findUserById(listing.sellerId);
+                const j = jackpotUser();
+                const fee = Math.floor(listing.price * 0.10);
+                const sellerReceive = listing.price - fee;
+                
+                buyer.balance -= listing.price;
+                seller.balance += sellerReceive;
+                j.balance += fee;
+                
+                listing.sold = (listing.sold || 0) + 1;
+                if (listing.sold >= listing.qty) {
+                    listing.active = false;
+                }
+                
+                // 権利とトランザクションを追加
+                const right = {
+                    id: id(),
+                    listingId: listing.id,
+                    title: listing.title,
+                    buyerId: buyer.id,
+                    sellerId: seller.id,
+                    ts: operation.timestamp,
+                    status: 'owned',
+                    executed: false,
+                    pending: true
+                };
+                state.rights.unshift(right);
+                
+                addTx({
+                    type: 'purchase',
+                    from: buyer.id,
+                    to: seller.id,
+                    amount: listing.price,
+                    listingId: listing.id,
+                    title: listing.title,
+                    memo: '権利購入（手数料10%）',
+                    pending: true
+                });
+            }
+            
+            saveLocal(true);
+        }
+
+        // ユーザー登録の修正版
+        async function register(name, pass) {
+            name = (name || '').trim();
+            if (!name || !pass) {
+                toast('ユーザー名とパスワードを入力');
+                return;
+            }
+            
+            if (name === 'ジャックポット') {
+                toast('この名前は予約されています');
+                return;
+            }
+            
+            if (state.users.some(u => u.name === name)) {
+                toast('そのユーザー名は使用済み');
+                return;
+            }
+            
+            const passHash = await sha256(pass);
+            
+            // 操作をキューに追加
+            const operation = createOperation('register_user', {
+                name: name,
+                passHash: passHash
+            }, null); // userIdはnull（新規登録なので）
+            
+            queueOperation(operation);
+            
+            // ローカルで楽観的更新
+            const u = {
+                id: id(),
+                name,
+                passHash,
+                balance: 10000,
+                streakCount: 0,
+                lastMorningDate: '',
+                pending: true
+            };
+            
+            state.users.push(u);
+            state.currentUserId = u.id;
+            state.lastRealUserId = u.id;
+            
+            addTx({
+                type: 'mint',
+                to: u.id,
+                amount: 10000,
+                memo: '初期発行',
+                pending: true
+            });
+            
+            saveLocal(true);
+            toast('登録処理中...');
+        }
+
+        // 朝活の修正版
+        function morningClaim() {
+            const me = currentUser();
+            const check = canClaimMorning();
+            if (!check.ok) {
+                toast(check.reason);
+                return;
+            }
+
+            // 操作をキューに追加
+            const operation = createOperation('morning_claim', {
+                date: todayKey()
+            });
+            
+            queueOperation(operation);
+            
+            // ローカルで楽観的更新
+            const today = todayKey();
+            if (me.lastMorningDate) {
+                const diff = Math.round((new Date(today) - new Date(me.lastMorningDate)) / 86400000);
+                me.streakCount = (diff === 1) ? Math.min((me.streakCount || 0) + 1, 30) : 1;
+            } else {
+                me.streakCount = 1;
+            }
+            
+            me.lastMorningDate = today;
+            const bonus = 1000 + 100 * (me.streakCount || 0);
+            me.balance += bonus;
+            
+            addTx({
+                type: 'mint',
+                to: me.id,
+                amount: bonus,
+                memo: `朝活（連続${me.streakCount}日）`,
+                pending: true
+            });
+            
+            saveLocal(true);
+        }
+
+        // ルーレットの修正版
+        function rouletteSpin() {
+            const me = currentUser();
+            if (!me || me.balance < 100) {
+                toast('参加できません');
+                return;
+            }
+            
+            const roll = Math.random(); // クライアント側で乱数生成
+            
+            // 操作をキューに追加
+            const operation = createOperation('roulette', {
+                roll: roll
+            });
+            
+            queueOperation(operation);
+            
+            // ローカルで楽観的更新（簡易版）
+            me.balance -= 100;
+            const j = jackpotUser();
+            j.balance += 100;
+            
+            addTx({
+                type: 'jpot-fee',
+                from: me.id,
+                to: j.id,
+                amount: 100,
+                memo: 'ルーレット参加費',
+                pending: true
+            });
+            
+            // 結果は一旦保留（サーバーレスポンス待ち）
+            document.getElementById('rouletteResult').textContent = '結果: 処理中...';
+            
+            saveLocal(true);
+        }
+
+        // サーバーとの同期処理（worker.js の /state PUT を使う）
+        // kvPushState replaced by sendOperationsToServer which sends immediately
+        async function kvPushState() {
+            // compatibility wrapper: send all pending synchronously
+            if (pendingOperations.length === 0) return;
+            const ops = [...pendingOperations];
+            const r = await sendOperationsToServer(ops);
+            if (r && r.ok) {
+                // server handled them
+            }
+        }
+
+        // サーバーから最新状態を取得（worker.js の GET /state を想定）
         async function kvFetchLatest() {
             if (!syncSettings.url || !syncSettings.room || !syncSettings.key) return;
             try {
                 const u = new URL(syncSettings.url);
                 u.searchParams.set('room', syncSettings.room);
                 u.searchParams.set('key', syncSettings.key);
-                const lastV = Number(localStorage.getItem('trpg_sync_kv_v') || 0);
-                u.searchParams.set('v', String(lastV));
+                u.searchParams.set('lastSync', String(lastSyncTime || 0));
+
                 const res = await fetch(u.toString(), {method: 'GET', headers: {accept: 'application/json'}});
-                if (res.status === 204) {                       // 変更なし
+                if (res.status === 204) {
                     els.lastSyncChip.textContent = '最終同期：変更なし ' + new Date().toLocaleTimeString();
                     return;
                 }
-                if (!res.ok) return;                             // 2xx以外は無視
-                const data = await res.json();
-                if (typeof data.v === 'number') localStorage.setItem('trpg_sync_kv_v', String(data.v));
-                // ここに来るのはJSONがある時だけ
-                if (data && data.state && data.state.vTick > (state.vTick || 0)) {
+                if (!res.ok) return;
+
+                const data = await res.json().catch(() => null);
+                if (!data) return;
+
+                // If server returns processedOps (what it has applied), remove them from pendingOperations
+                if (Array.isArray(data.processedOps)) {
+                    const processedIds = new Set(data.processedOps.map(p => p.id || p));
+                    pendingOperations = pendingOperations.filter(op => !processedIds.has(op.id));
+                }
+
+                if (data.state && data.lastUpdate && data.lastUpdate > (lastSyncTime || 0)) {
                     const keep = state.currentUserId;
                     state = data.state;
                     state.currentUserId = keep || null;
                     saveLocal(true);
                     renderAll();
                     els.lastSyncChip.textContent = '最終同期：受信 ' + new Date().toLocaleTimeString();
+                    lastSyncTime = data.lastUpdate || Date.now();
+                }
+
+                if (data.conflicts && data.conflicts.length) {
+                    handleConflicts(data.conflicts);
                 }
             } catch (e) {
+                console.error('kvFetchLatest error', e);
             }
         }
 
-        async function kvPushState() {
-            if (!syncSettings.url || !syncSettings.room || !syncSettings.key) return;
+        // Listen to localStorage changes from other tabs and reconcile
+        window.addEventListener('storage', (e) => {
             try {
-                const u = new URL(syncSettings.url);
-                u.searchParams.set('room', syncSettings.room);
-                u.searchParams.set('key', syncSettings.key);
-                const payload = JSON.stringify({
-                    vTick: state.vTick,
-                    state: Object.assign({}, state, {currentUserId: null})
-                });
-                const res = await fetch(u.toString(), {
-                    method: 'PUT',
-                    headers: {'content-type': 'application/json'},
-                    body: payload
-                });
-                if (res.ok) {
-                      // 送信側でも lastV を即更新
-                  try {
-                    const data = await res.json();
-                    if (typeof data.v === 'number') {
-                      localStorage.setItem('trpg_sync_kv_v', String(data.v));
-                    }
-                  } catch {}
-                    els.lastSyncChip.textContent = '最終同期：送信 ' + new Date().toLocaleTimeString();
+                if (e.key !== LS_KEY) return;
+                if (!e.newValue) return;
+                const newState = JSON.parse(e.newValue);
+                if (!newState) return;
+                const keep = state.currentUserId;
+                state = newState;
+                state.currentUserId = keep || null;
+                // prevent appliedOpIds from growing unbounded
+                if (appliedOpIds.size > 5000) {
+                    appliedOpIds.clear();
                 }
-            } catch (e) {
+                renderAll();
+            } catch (err) {
+                console.error('storage event handling error', err);
             }
-        }
+        });
 
         async function sha256(text) {
             const enc = new TextEncoder().encode(text);
@@ -1138,10 +1352,7 @@
             bump();
             saveLocal();
             renderAll();
-            // If sync is active, update its userId to the newly registered user
-            if (sync) {
-                try { sync.userId = u.id; } catch (e) {}
-            }
+            // sync client removed: registration will be pushed via operation queue
             toast('登録完了');
         }
 
@@ -1166,10 +1377,7 @@
             localStorage.setItem('last_current_uid', state.currentUserId || '');
             saveLocal(true);
             renderAll();
-            // Update sync userId so subsequent operations carry correct user identity
-            if (sync) {
-                try { sync.userId = state.currentUserId || (state.lastRealUserId || 'anonymous'); } catch (e) {}
-            }
+            // sync client removed: subsequent operations will use state.currentUserId
             toast('ログイン');
         }
 
@@ -1178,10 +1386,7 @@
             localStorage.setItem('last_current_uid', '');
             saveLocal(true);
             renderAll();
-            // reflect logout in sync
-            if (sync) {
-                try { sync.userId = state.lastRealUserId || 'anonymous'; } catch (e) {}
-            }
+            // sync client removed: nothing to reflect here
             toast('ログアウト');
         }
 
@@ -1218,26 +1423,11 @@
                 return;
             }
 
-            const op = {
-                type: 'TRANSFER',
-                fromId: from.id,
-                toId: to.id,
-                amount: amount,
-                memo: (memo || '').trim(),
-                opId: `transfer_${Date.now()}_${Math.random().toString(36).substr(2,6)}`
-            };
-
-            if (sync) {
-                const res = await sync.sendOperation(op);
-                if (!res) toast('同期送信に失敗しました');
-            } else {
-                from.balance -= amount;
-                to.balance += amount;
-                addTx({type: 'transfer', from: from.id, to: to.id, amount, memo: (memo || '').trim()});
-                bump();
-                saveLocal();
-                renderAll();
-            }
+            // legacy OperationBasedSync removed — use queue-based createOperation + queueOperation
+            const operation = createOperation('transfer', { toId: to.id, amount: amount, memo: (memo || '').trim() });
+            queueOperation(operation);
+            // optimistic update already applied in the other transfer implementation
+            return;
         }
 
     async function createListing(title, price, desc) {
@@ -1258,27 +1448,18 @@
                 toast('入力を確認');
                 return;
             }
-            const op = {
-                type: 'CREATE_LISTING',
-                title,
-                price,
-                desc,
-                sellerId: seller.id,
-                qty,
-                listingId: `listing_${Date.now()}_${Math.random().toString(36).substr(2,6)}`,
-                opId: `create_${Date.now()}_${Math.random().toString(36).substr(2,6)}`
-            };
+            const operation = createOperation('create_listing', {
+                title, price, desc, qty,
+                listingId: `listing_${Date.now()}_${Math.random().toString(36).substr(2,6)}`
+            });
+            queueOperation(operation);
 
-            if (sync) {
-                const res = await sync.sendOperation(op);
-                if (!res) toast('同期送信に失敗しました');
-            } else {
-                const l = {id: id(), title, price, desc, sellerId: seller.id, active: true, ts: Date.now(), qty, sold: 0};
-                state.listings.unshift(l);
-                bump();
-                saveLocal();
-                renderAll();
-            }
+            // optimistic local apply
+            const l = {id: id(), title, price, desc, sellerId: seller.id, active: true, ts: Date.now(), qty, sold: 0, pending: true};
+            state.listings.unshift(l);
+            bump();
+            saveLocal(true);
+            renderAll();
         }
 
     async function buyListing(listingId) {
@@ -1313,45 +1494,38 @@
                 toast('残高不足');
                 return;
             }
-            const op = {
-                type: 'PURCHASE',
-                buyerId: buyer.id,
-                listingId: l.id,
-                opId: `purchase_${Date.now()}_${Math.random().toString(36).substr(2,6)}`
-            };
+            const operation = createOperation('buy_listing', { listingId: l.id });
+            queueOperation(operation);
 
-            if (sync) {
-                const res = await sync.sendOperation(op);
-                if (!res) toast('同期送信に失敗しました');
-            } else {
-                const seller = findUserById(l.sellerId);
-                const j = jackpotUser();
-                const fee = Math.floor(l.price * 0.10);
-                const sellerReceive = l.price - fee;
-                buyer.balance -= l.price;
-                seller.balance += sellerReceive;
-                if (j) j.balance += fee;
-                const right = {
-                    id: id(),
-                    listingId: l.id,
-                    title: l.title,
-                    buyerId: buyer.id,
-                    sellerId: seller.id,
-                    ts: Date.now(),
-                    status: 'owned',
-                    executed: false
-                };
-                state.rights.unshift(right);
-                l.sold = (l.sold || 0) + 1;
-                if (l.sold >= l.qty) {
-                    l.active = false;
-                }
-                addTx({ type: 'purchase', from: buyer.id, to: seller.id, amount: l.price, listingId: l.id, title: l.title, memo: '権利購入（手数料10%）' });
-                addTx({ type: 'fee', from: seller.id, to: j ? j.id : 'jpot', amount: fee, listingId: l.id, title: l.title, memo: '販売手数料' });
-                bump();
-                saveLocal();
-                renderAll();
+            // optimistic local apply (already implemented earlier in the file, but keep safe here)
+            const seller = findUserById(l.sellerId);
+            const j = jackpotUser();
+            const fee = Math.floor(l.price * 0.10);
+            const sellerReceive = l.price - fee;
+            buyer.balance -= l.price;
+            if (seller) seller.balance += sellerReceive;
+            if (j) j.balance += fee;
+            const right = {
+                id: id(),
+                listingId: l.id,
+                title: l.title,
+                buyerId: buyer.id,
+                sellerId: seller ? seller.id : l.sellerId,
+                ts: Date.now(),
+                status: 'owned',
+                executed: false,
+                pending: true
+            };
+            state.rights.unshift(right);
+            l.sold = (l.sold || 0) + 1;
+            if (l.sold >= l.qty) {
+                l.active = false;
             }
+            addTx({ type: 'purchase', from: buyer.id, to: seller ? seller.id : l.sellerId, amount: l.price, listingId: l.id, title: l.title, memo: '権利購入（手数料10%）', pending: true });
+            addTx({ type: 'fee', from: seller ? seller.id : l.sellerId, to: j ? j.id : 'jpot', amount: fee, listingId: l.id, title: l.title, memo: '販売手数料', pending: true });
+            bump();
+            saveLocal(true);
+            renderAll();
         }
 
         function deleteListing(listingId) {
@@ -1374,15 +1548,12 @@
                 toast('購入履歴があるため削除不可');
                 return;
             }
-            const op = { type: 'REMOVE_LISTING', listingId: listingId, opId: `rm_${Date.now()}_${Math.random().toString(36).substr(2,6)}` };
-            if (sync) {
-                sync.sendOperation(op);
-            } else {
-                state.listings.splice(idx, 1);
-                bump();
-                saveLocal();
-                renderAll();
-            }
+            const operation = createOperation('delete_listing', { listingId });
+            queueOperation(operation);
+            state.listings.splice(idx, 1);
+            bump();
+            saveLocal(true);
+            renderAll();
         }
 
         function toggleListingActive(listingId) {
@@ -1400,15 +1571,12 @@
                 toast('自分の出品のみ');
                 return;
             }
-            const op = { type: 'TOGGLE_LISTING', listingId, opId: `tgl_${Date.now()}_${Math.random().toString(36).substr(2,6)}` };
-            if (sync) {
-                sync.sendOperation(op);
-            } else {
-                l.active = !l.active;
-                bump();
-                saveLocal();
-                renderAll();
-            }
+            const operation = createOperation('toggle_listing', { listingId });
+            queueOperation(operation);
+            l.active = !l.active;
+            bump();
+            saveLocal(true);
+            renderAll();
         }
 
         function buyerReturn(rightId) {
@@ -1933,37 +2101,65 @@
         });
         els.searchInput.addEventListener('input', renderHistory);
         els.memberFilter.addEventListener('change', renderHistory);
-        els.exportBtn.addEventListener('click', () => {
-            const blob = new Blob([JSON.stringify(state, null, 2)], {type: 'application/json'});
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'trpg_token_v14.json';
-            a.click();
-            URL.revokeObjectURL(a.href);
-        });
+        // Server-side export/import
+        async function fetchExport() {
+            if (!syncSettings.url || !syncSettings.room || !syncSettings.key) {
+                toast('同期設定が必要です');
+                return;
+            }
+            try {
+                const u = new URL(syncSettings.url.replace(/\/state$/, '') + '/export');
+                u.searchParams.set('room', syncSettings.room);
+                u.searchParams.set('key', syncSettings.key);
+                const res = await fetch(u.toString(), { method: 'POST' });
+                if (!res.ok) { toast('エクスポート失敗'); return; }
+                const data = await res.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `trpg_export_${syncSettings.room}_${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                toast('エクスポート完了');
+            } catch (e) {
+                console.error('export failed', e);
+                toast('エクスポート失敗');
+            }
+        }
+
+        async function fetchImport(file) {
+            if (!syncSettings.url || !syncSettings.room || !syncSettings.key) {
+                toast('同期設定が必要です');
+                return;
+            }
+            try {
+                const txt = await file.text();
+                const jsonData = JSON.parse(txt);
+                if (!confirm(`部屋「${syncSettings.room}」を上書きしてインポートしますか？`)) return;
+                const u = new URL(syncSettings.url.replace(/\/state$/, '') + '/import');
+                u.searchParams.set('room', syncSettings.room);
+                u.searchParams.set('key', syncSettings.key);
+                const res = await fetch(u.toString(), { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ data: jsonData, overwrite: true }) });
+                if (!res.ok) { toast('インポート失敗'); return; }
+                const result = await res.json();
+                if (result && result.ok) {
+                    toast('インポート完了');
+                    // fetch latest state
+                    await kvFetchLatest();
+                } else {
+                    toast('インポート失敗');
+                }
+            } catch (e) {
+                console.error('import failed', e);
+                toast('インポート失敗');
+            }
+        }
+
+        els.exportBtn.addEventListener('click', () => fetchExport());
         els.importFile.addEventListener('change', e => {
             const f = e.target.files[0];
             if (!f) return;
-            const r = new FileReader();
-            r.onload = ev => {
-                try {
-                    const data = JSON.parse(ev.target.result);
-                    const keep = state.currentUserId;
-                    state = Object.assign({
-                        version: 14,
-                        approval: {active: false, votes: {}},
-                        lastRealUserId: null,
-                        vTick: (state.vTick || 0) + 1
-                    }, data);
-                    state.currentUserId = keep || null;
-                    ensureJackpotUser();
-                    saveLocal();
-                    renderAll();
-                } catch {
-                    toast('読み込み失敗')
-                }
-            };
-            r.readAsText(f);
+            fetchImport(f);
             e.target.value = '';
         });
         document.querySelectorAll('.card .hd .tabbar .tab').forEach(t => t.addEventListener('click', () => {
@@ -1980,20 +2176,24 @@
         els.rouletteBtn.addEventListener('click', rouletteSpin);
         els.btnConnect.addEventListener('click', () => {
             saveSyncSettings();
-            // toggle OperationBasedSync
-            if (sync && sync.pollInterval) {
-                sync.stopPolling();
-                sync = null;
+            // toggle queue-based KV sync
+            if (syncPollTimer) {
+                clearInterval(syncPollTimer);
+                syncPollTimer = null;
+                els.syncStatus.textContent = '停止中';
+                toast('同期を停止しました');
             } else {
-                if (syncSettings.url && syncSettings.room) {
-                    // ensure current user id used
-                    const uid = currentUser() ? currentUser().id : (state.lastRealUserId || 'anonymous');
-                    sync = new OperationBasedSync(syncSettings.url, syncSettings.room, uid);
-                    sync.onStateChanged = () => {
-                        // re-render after ops applied
-                        renderAll();
-                    };
-                    sync.startPolling();
+                if (syncSettings.url && syncSettings.room && syncSettings.key) {
+                    // start periodic push + fetch loop
+                    // push pending ops every 2s, fetch latest every 3s
+                    kvFetchLatest();
+                    syncPollTimer = setInterval(() => {
+                        // push first, then fetch
+                        kvPushState().catch(e => console.error('kvPushState err', e));
+                        kvFetchLatest().catch(e => console.error('kvFetchLatest err', e));
+                    }, 3000);
+                    els.syncStatus.textContent = '同期中';
+                    toast('同期を開始しました');
                 } else {
                     toast('同期設定を入力してください');
                 }
