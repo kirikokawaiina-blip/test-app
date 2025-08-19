@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>trpg鯖 トークン | Cloudflare同期版 v18 (KV-poll)</title>
+    <title>trpg鯖 トークン | Cloudflare同期版 v19 (KV-poll)</title>
     <meta name="description" content="Cloudflare Workers + KV を使ったルーム同期（無料プラン対応）。"/>
     <style>body {
         margin: 0;
@@ -2200,6 +2200,31 @@
                 }
             }
         });
+
+        // Adjust table max-heights so card tables can grow to match left column but still scroll beyond that
+        function adjustCardTableHeights() {
+            try {
+                const grid = document.querySelector('.grid');
+                if (!grid) return;
+                const leftCard = grid.querySelector('section.card'); // first card in grid (left column)
+                if (!leftCard) return;
+                const leftRect = leftCard.getBoundingClientRect();
+                // compute available height relative to viewport, allow a small padding
+                const available = Math.max(200, leftRect.height - 24);
+                document.querySelectorAll('.card .bd .table').forEach(t => {
+                    t.style.maxHeight = available + 'px';
+                });
+            } catch (e) {
+                console.warn('adjustCardTableHeights error', e);
+            }
+        }
+
+        // run on load, resize, and after each render to keep heights in sync
+        window.addEventListener('load', adjustCardTableHeights);
+        window.addEventListener('resize', () => { setTimeout(adjustCardTableHeights, 80); });
+        // call after renderAll to react to dynamic content changes
+        const origRenderAll = renderAll;
+        renderAll = function() { origRenderAll(); adjustCardTableHeights(); };
         els.btnSyncNow.addEventListener('click', async () => {
             try {
                 await kvPushState();
