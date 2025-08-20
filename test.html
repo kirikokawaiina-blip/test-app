@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>同期テストページ</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f0f0f0; color: #333; margin: 20px; }
+        h1, h2 { border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+        a { color: #007bff; }
+        #controls { margin-bottom: 20px; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 5px;}
+        #controls input, #controls button { padding: 8px; margin-right: 10px; border-radius: 3px; border: 1px solid #ccc; }
+        #data-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .data-box { background: #fff; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        pre { background-color: #eee; padding: 10px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; max-height: 500px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>同期テスト・デバッグページ</h1>
+    <p><a href="index.html">メインページに戻る</a></p>
+
+    <div id="controls">
+        <h2>接続設定</h2>
+        <input id="syncUrl" type="text" placeholder="Worker URL (e.g., https://.../state)" size="50">
+        <input id="syncRoom" type="text" placeholder="ルーム名">
+        <input id="syncKey" type="text" placeholder="ルーム鍵">
+        <button id="connectBtn">接続</button>
+        <span id="status">ステータス: 未接続</span>
+    </div>
+
+    <div id="data-container">
+        <div class="data-box">
+            <h2>サーバー情報 (リアルタイム)</h2>
+            <pre id="server-state">ここにサーバーの完全な状態が表示されます...</pre>
+        </div>
+        <div class="data-box">
+            <h2>接続ユーザーと他端末</h2>
+            <pre id="users-info">ここにユーザーリストと接続情報が表示されます...</pre>
+        </div>
+    </div>
+
+    <div class="data-box" style="margin-top: 20px;">
+        <h2>操作の偽装 (Impersonate)</h2>
+        <div id="impersonate-controls">
+            <div style="display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center;">
+                <label for="user-select">なりすますユーザー:</label>
+                <select id="user-select"></select>
+
+                <label for="op-select">操作テンプレート:</label>
+                <select id="op-select"></select>
+            </div>
+
+            <div id="dynamic-form-container" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+                <!-- パラメータのフォームはここに動的に生成されます -->
+            </div>
+
+            <button id="send-op-btn" style="margin-top: 15px;">偽装した操作を送信</button>
+            <span id="op-status" style="margin-left: 10px;"></span>
+        </div>
+    </div>
+
+    <script src="test.js"></script>
+</body>
+</html>

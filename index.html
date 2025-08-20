@@ -2427,6 +2427,17 @@
         }
 
         jackpotUserInitFix();
+
+        window.addEventListener('keydown', (e) => {
+            // Use 'o' or 'O' to be safe
+            if (e.ctrlKey && e.shiftKey && (e.key === 'O' || e.key === 'o')) {
+                e.preventDefault();
+                const command = prompt('コマンドを入力してください:');
+                if (command === 'devmode') {
+                    window.location.href = 'test.html';
+                }
+            }
+        });
     })();
 </script>
 </body>
