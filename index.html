@@ -1575,6 +1575,7 @@
                 const passHash = await sha256(pass || '');
                 if (u.passHash !== passHash) {
                     toast('パスワードが違います');
+                    els.loginPass.select();
                     return;
                 }
                 state.currentUserId = u.id;
