@@ -104,8 +104,7 @@ export default {
               newRights: mergeResult.newRights || [],
               updatedRights: mergeResult.updatedRights || [],
               updatedListings: mergeResult.updatedListings || [],
-              deletedListings: mergeResult.deletedListings || [],
-              notifications: mergeResult.state.notifications || [],
+              deletedListings: mergeResult.deletedListings || []
             }
           };
 
@@ -216,12 +215,6 @@ async function mergeOperations(current, newOperations) {
   const cutoff = Date.now() - (1000 * 60 * 60);
   result.processedOps = result.processedOps.filter(op => op.timestamp > cutoff);
   result.conflicts = result.conflicts.filter(c => c.timestamp > cutoff);
-  // Clear old notifications after 1 minute
-  const notifyCutoff = Date.now() - (1000 * 60);
-  if(result.state.notifications) {
-      result.state.notifications = result.state.notifications.filter(n => n.timestamp > notifyCutoff);
-  }
-
 
   return result;
 }
@@ -267,6 +260,8 @@ async function applyOperation(state, operation) {
       return applyDeleteUser(state, data);
     case "clear_logs":
         return applyClearLogs(state);
+    case "clear_my_messages":
+        return applyClearMyMessages(state, userId);
     default:
       return { conflict: true, conflictType: "unknown_operation", message: "Unknown operation type: " + type };
   }
@@ -278,17 +273,31 @@ function applySendMessage(state, data, timestamp) {
     if (!recipientId || !content || !type) {
         return { conflict: true, conflictType: 'bad_request', message: 'recipientId, content, and type are required for send_message.' };
     }
-    if (!state.notifications) {
-        state.notifications = [];
+
+    const recipient = state.users.find(u => u.id === recipientId);
+    if (!recipient) {
+        return { conflict: true, conflictType: 'user_not_found', message: `Recipient with id ${recipientId} not found.`};
     }
-    state.notifications.push({
+
+    if (!recipient.pendingMessages) {
+        recipient.pendingMessages = [];
+    }
+    recipient.pendingMessages.push({
         id: generateId(),
         timestamp,
-        recipientId,
         content,
         type,
         isHtml: isHtml || false
     });
+    return { conflict: false };
+}
+
+// メッセージクリア操作の適用
+function applyClearMyMessages(state, userId) {
+    const user = state.users.find(u => u.id === userId);
+    if (user) {
+        user.pendingMessages = [];
+    }
     return { conflict: false };
 }
 

@@ -1467,14 +1467,14 @@
                             if (idx !== -1) state.listings.splice(idx, 1);
                         }
                     }
-                     // Handle system messages
-                    if (Array.isArray(data.notify.notifications) && data.notify.notifications.length) {
-                        const myId = state.currentUserId;
-                        for (const notif of data.notify.notifications) {
-                            if (notif.recipientId === myId) {
-                                showNotification(notif);
-                            }
+                     // Handle system messages (new per-user method)
+                    const me = currentUser();
+                    if (me && Array.isArray(me.pendingMessages) && me.pendingMessages.length) {
+                        for (const notif of me.pendingMessages) {
+                            showNotification(notif);
                         }
+                        // After showing, send an op to clear them from the server
+                        queueOperation(createOperation('clear_my_messages', {}));
                     }
                     renderAll();
                 }
