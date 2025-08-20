@@ -80,7 +80,7 @@ export default {
 
           // 現在の状態を取得
           const current = await env.STATE_KV.get(kvKey, "json") || {
-            state: { users: [], txs: [], listings: [], rights: [], notifications: [], vTick: 0 },
+            state: { users: [], txs: [], listings: [], rights: [], notifications: [], approval: { active: false, operation: null, votes: {} }, vTick: 0 },
             lastUpdate: 0,
             processedOps: [],
             conflicts: []
@@ -262,6 +262,10 @@ async function applyOperation(state, operation) {
         return applyClearLogs(state);
     case "clear_my_messages":
         return applyClearMyMessages(state, userId);
+    case "request_transfer":
+      return applyRequestTransfer(state, data, timestamp, userId, meta);
+    case "vote_on_transfer":
+      return applyVoteOnTransfer(state, data, timestamp, userId, meta);
     default:
       return { conflict: true, conflictType: "unknown_operation", message: "Unknown operation type: " + type };
   }
@@ -472,6 +476,79 @@ function applyRoulette(state, data, timestamp, userId, meta) {
   }
   state.vTick = (state.vTick || 0) + 1;
   return { conflict: false, payout, createdTxs };
+}
+
+
+function applyRequestTransfer(state, data, timestamp, userId, meta) {
+  if (state.approval && state.approval.active) {
+    return { conflict: true, conflictType: "approval_in_progress", message: "別の承認が進行中です。" };
+  }
+
+  const { toId, amount, memo } = data;
+  const from = state.users.find(u => u.id === userId);
+  const to = state.users.find(u => u.id === toId);
+
+  if (!from || !to) return { conflict: true, conflictType: "user_not_found", message: "送信者または受信者が見つかりません" };
+  if (from.balance < amount) return { conflict: true, conflictType: "insufficient_balance", message: "残高不足" };
+  if (amount <= 0) return { conflict: true, conflictType: "invalid_amount", message: "無効な金額" };
+
+  state.approval = {
+    active: true,
+    operation: {
+      type: 'transfer',
+      data: { fromId: userId, toId, amount, memo },
+      timestamp
+    },
+    votes: {},
+    requesterId: userId
+  };
+
+  state.vTick = (state.vTick || 0) + 1;
+  return { conflict: false, newApproval: state.approval };
+}
+
+function applyVoteOnTransfer(state, data, timestamp, userId, meta) {
+  if (!state.approval || !state.approval.active) {
+    return { conflict: true, conflictType: "no_approval_in_progress", message: "承認中の転送はありません。" };
+  }
+  if (userId === state.approval.requesterId) {
+    return { conflict: true, conflictType: "cannot_vote_on_own_request", message: "自分のリクエストには投票できません。" };
+  }
+  if (state.approval.votes[userId]) {
+    return { conflict: true, conflictType: "already_voted", message: "既に投票済みです。" };
+  }
+
+  state.approval.votes[userId] = data.vote; // 'yes' or 'no'
+
+  const voters = state.users.filter(u => u.id !== state.approval.requesterId && u.name !== 'ジャックポット');
+  const totalVoters = voters.length;
+
+  const votes = Object.values(state.approval.votes);
+  const yesVotes = votes.filter(v => v === 'yes').length;
+  const noVotes = votes.filter(v => v === 'no').length;
+
+  let transferExecuted = false;
+
+  if (yesVotes > totalVoters / 2) {
+    const { fromId, toId, amount, memo } = state.approval.operation.data;
+    const from = state.users.find(u => u.id === fromId);
+    const to = state.users.find(u => u.id === toId);
+
+    if (from && to && from.balance >= amount) {
+        from.balance -= amount;
+        to.balance += amount;
+        const tx = { id: generateId(), ts: timestamp, type: 'transfer', from: fromId, to: toId, amount, memo: `[承認済] ${memo || ''}` };
+        if (!meta?.silent) state.txs.unshift(tx);
+        transferExecuted = true;
+    }
+    state.approval = { active: false, operation: null, votes: {} };
+
+  } else if (noVotes >= totalVoters / 2) {
+    state.approval = { active: false, operation: null, votes: {} };
+  }
+
+  state.vTick = (state.vTick || 0) + 1;
+  return { conflict: false, voteCasted: true, transferExecuted };
 }
 
 function generateId() {

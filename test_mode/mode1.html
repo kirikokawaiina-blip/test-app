@@ -306,14 +306,6 @@
 
         const SCHEMAS = {
             '': { description: 'テンプレートを選択...', params: [] },
-            transfer: {
-                description: 'ユーザー間でコインを送金します。',
-                params: [
-                    { name: 'toId', type: 'user_id', label: '送信先' },
-                    { name: 'amount', type: 'number', label: '金額' },
-                    { name: 'memo', type: 'string', label: 'メモ', optional: true },
-                ]
-            },
             create_listing: {
                 description: '新しい権利を出品します。',
                 params: [
@@ -342,6 +334,14 @@
                     { name: 'action', type: 'select', label: 'アクション', options: ['exec', 'cancel'] },
                 ]
             },
+            request_transfer_approval: {
+                description: '送金の承認をリクエストします。',
+                params: [
+                    { name: 'recipientId', type: 'user_id', label: '送信先' },
+                    { name: 'amount', type: 'number', label: '金額' },
+                    { name: 'memo', type: 'string', label: 'メモ', optional: true },
+                ]
+            },
         };
 
         function App() {
@@ -356,6 +356,7 @@
             const [serverState, setServerState] = useState({});
             const [logs, setLogs] = useState([]);
             const [activeTab, setActiveTab] = useState('logs');
+            const [impersonatedUser, setImpersonatedUser] = useState('');
 
             const addLog = useCallback((type, message) => {
                 setLogs(prev => [{ type, message, ts: new Date() }, ...prev.slice(0, 99)]);
@@ -423,6 +424,14 @@
                 }
             }, [status.connected, settings, addLog]);
 
+            const currentUser = useMemo(() => (serverState.users || []).find(u => u.id === impersonatedUser), [serverState.users, impersonatedUser]);
+
+            useEffect(() => {
+                if (serverState.users && serverState.users.length > 0 && !impersonatedUser) {
+                    setImpersonatedUser(serverState.users[0].id);
+                }
+            }, [serverState.users, impersonatedUser]);
+
             return (
                 <div className="app-container">
                     <header className="app-header">
@@ -431,7 +440,18 @@
                     </header>
                     <aside className="app-sidebar">
                         <ConnectionPanel settings={settings} onSettingChange={handleSettingChange} onConnect={connect} status={status} />
-                        <OperationBuilder serverState={serverState} onSendOperation={sendOperation} />
+                        <OperationBuilder
+                            serverState={serverState}
+                            onSendOperation={sendOperation}
+                            impersonatedUser={impersonatedUser}
+                            setImpersonatedUser={setImpersonatedUser}
+                        />
+                        <ApprovalPanel
+                            approvals={serverState.approvals || []}
+                            users={serverState.users || []}
+                            currentUser={currentUser}
+                            onSendOperation={sendOperation}
+                        />
                         <MessagingPanel users={serverState.users || []} onSendOperation={sendOperation} />
                     </aside>
                     <main className="app-main">
@@ -468,17 +488,10 @@
             </div>
         );
 
-        const OperationBuilder = ({ serverState, onSendOperation }) => {
+        const OperationBuilder = ({ serverState, onSendOperation, impersonatedUser, setImpersonatedUser }) => {
             const [selectedOp, setSelectedOp] = useState('');
-            const [impersonatedUser, setImpersonatedUser] = useState('');
             const [formState, setFormState] = useState({});
             const [isSilent, setIsSilent] = useState(true);
-
-            useEffect(() => {
-                if (serverState.users && serverState.users.length > 0 && !impersonatedUser) {
-                    setImpersonatedUser(serverState.users[0].id);
-                }
-            }, [serverState.users, impersonatedUser]);
 
             const handleOpChange = (e) => {
                 const opName = e.target.value;
@@ -623,6 +636,60 @@
                 ))}
             </div>
         );
+
+        const ApprovalPanel = ({ approvals = [], users = [], currentUser, onSendOperation }) => {
+            const myApprovals = approvals.filter(a => a.approverId === currentUser?.id && a.status === 'pending');
+
+            const handleAction = (approvalId, action) => {
+                if (!currentUser) return;
+                const op = {
+                    id: 'op_' + Math.random().toString(36).slice(2) + '_' + Date.now(),
+                    type: 'approve_transfer',
+                    data: { approvalId, action },
+                    timestamp: Date.now(),
+                    userId: currentUser.id,
+                    clientId: 'client_' + Math.random().toString(36).slice(2),
+                    sessionId: 'session_' + Math.random().toString(36).slice(2),
+                    meta: { silent: false }
+                };
+                onSendOperation(op);
+            };
+
+            const getUserName = (userId) => {
+                const user = users.find(u => u.id === userId);
+                return user ? user.name : '不明なユーザー';
+            };
+
+            if (!currentUser || myApprovals.length === 0) {
+                return null;
+            }
+
+            return (
+                <div className="panel">
+                    <h2>送金承認待ち</h2>
+                    {myApprovals.map(approval => (
+                        <div key={approval.id} style={{ borderBottom: '1px solid var(--border-color)', padding: '10px 0' }}>
+                            <div className="form-grid">
+                                <label>リクエスト元</label>
+                                <span>{getUserName(approval.requesterId)}</span>
+                                <label>金額</label>
+                                <span>{approval.amount.toLocaleString()} 円</span>
+                                {approval.memo && (
+                                    <React.Fragment>
+                                        <label>メモ</label>
+                                        <span>{approval.memo}</span>
+                                    </React.Fragment>
+                                )}
+                            </div>
+                            <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                                <button onClick={() => handleAction(approval.id, 'reject')} style={{ backgroundColor: 'var(--orange)' }}>拒否</button>
+                                <button onClick={() => handleAction(approval.id, 'approve')} style={{ backgroundColor: 'var(--green)' }}>承認</button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
 
         const MessagingPanel = ({ users = [], onSendOperation }) => {
             const [recipientId, setRecipientId] = useState('');
