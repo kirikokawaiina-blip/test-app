@@ -3,62 +3,577 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>同期テストページ</title>
+    <title>高機能同期テストクライアント</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
-        body { font-family: sans-serif; background-color: #f0f0f0; color: #333; margin: 20px; }
-        h1, h2 { border-bottom: 1px solid #ccc; padding-bottom: 10px; }
-        a { color: #007bff; }
-        #controls { margin-bottom: 20px; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 5px;}
-        #controls input, #controls button { padding: 8px; margin-right: 10px; border-radius: 3px; border: 1px solid #ccc; }
-        #data-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .data-box { background: #fff; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
-        pre { background-color: #eee; padding: 10px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; max-height: 500px; overflow-y: auto; }
+        :root {
+            --bg-color: #1a1b26;
+            --bg-secondary: #24283b;
+            --bg-tertiary: #414868;
+            --fg-color: #c0caf5;
+            --fg-muted: #a9b1d6;
+            --accent-color: #7aa2f7;
+            --accent-secondary: #bb9af7;
+            --green: #9ece6a;
+            --red: #f7768e;
+            --orange: #ff9e64;
+            --border-color: #3b3f5b;
+            --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body, #root {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--fg-color);
+            font-family: var(--font-family);
+            font-size: 14px;
+            overflow: hidden;
+        }
+
+        #root {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .app-container {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            grid-template-rows: auto 1fr auto;
+            grid-template-areas:
+                "header header"
+                "sidebar main"
+                "footer footer";
+            height: 100vh;
+            gap: 1px;
+            background-color: var(--border-color);
+        }
+
+        .app-header {
+            grid-area: header;
+            background-color: var(--bg-secondary);
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .app-header h1 {
+            margin: 0;
+            font-size: 1.2em;
+            color: var(--fg-color);
+        }
+        .app-header h1 .highlight {
+            color: var(--accent-secondary);
+        }
+
+        .app-sidebar {
+            grid-area: sidebar;
+            background-color: var(--bg-secondary);
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .app-main {
+            grid-area: main;
+            background-color: var(--bg-color);
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .app-footer {
+            grid-area: footer;
+            background-color: var(--bg-secondary);
+            padding: 8px 20px;
+            border-top: 1px solid var(--border-color);
+            font-size: 0.8em;
+            text-align: center;
+            color: var(--fg-muted);
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+            background-color: var(--red);
+        }
+        .status-indicator.connected {
+            background-color: var(--green);
+        }
+
+        .panel {
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .panel h2 {
+            margin-top: 0;
+            font-size: 1.1em;
+            color: var(--accent-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 12px;
+            align-items: center;
+        }
+        .form-grid label {
+            font-weight: 600;
+            color: var(--fg-muted);
+        }
+        .form-grid .full-width {
+            grid-column: 1 / -1;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            background-color: var(--bg-secondary);
+            color: var(--fg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            padding: 8px 10px;
+            font-family: var(--font-family);
+            font-size: 1em;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px var(--accent-color-translucent, rgba(122, 162, 247, 0.3));
+        }
+
+        textarea {
+            font-family: var(--font-mono);
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        button {
+            background: linear-gradient(145deg, var(--accent-color), #567afc);
+            color: #fff;
+            font-weight: 600;
+            border: none;
+            border-radius: 5px;
+            padding: 10px 15px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        button:hover {
+            opacity: 0.9;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: var(--fg-muted);
+            margin-bottom: -1px; /* Overlap border */
+        }
+        .tab.active {
+            color: var(--accent-color);
+            border-bottom-color: var(--accent-color);
+        }
+
+        .json-viewer {
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+            white-space: pre;
+            background-color: var(--bg-secondary);
+            padding: 15px;
+            border-radius: 5px;
+            overflow: auto;
+            max-height: 60vh;
+        }
+        .json-viewer .key { color: var(--accent-secondary); }
+        .json-viewer .string { color: var(--green); }
+        .json-viewer .number { color: var(--orange); }
+        .json-viewer .boolean { color: var(--red); }
+        .json-viewer .null { color: var(--fg-muted); }
+
+        .log-panel {
+            background-color: var(--bg-secondary);
+            border-radius: 5px;
+            padding: 15px;
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .log-entry:last-child { border-bottom: none; }
+        .log-entry .timestamp { color: var(--fg-muted); margin-right: 10px; }
+        .log-entry .type-sent { color: var(--orange); }
+        .log-entry .type-recv { color: var(--green); }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-color);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--fg-muted);
+        }
     </style>
 </head>
 <body>
-    <h1>同期テスト・デバッグページ</h1>
-    <p><a href="index.html">メインページに戻る</a></p>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo } = React;
 
-    <div id="controls">
-        <h2>接続設定</h2>
-        <input id="syncUrl" type="text" placeholder="Worker URL (e.g., https://.../state)" size="50">
-        <input id="syncRoom" type="text" placeholder="ルーム名">
-        <input id="syncKey" type="text" placeholder="ルーム鍵">
-        <button id="connectBtn">接続</button>
-        <span id="status">ステータス: 未接続</span>
-    </div>
+        const SCHEMAS = {
+            '': { description: 'テンプレートを選択...', params: [] },
+            transfer: {
+                description: 'ユーザー間でコインを送金します。',
+                params: [
+                    { name: 'toId', type: 'user_id', label: '送信先' },
+                    { name: 'amount', type: 'number', label: '金額' },
+                    { name: 'memo', type: 'string', label: 'メモ', optional: true },
+                ]
+            },
+            create_listing: {
+                description: '新しい権利を出品します。',
+                params: [
+                    { name: 'title', type: 'string', label: 'タイトル' },
+                    { name: 'price', type: 'number', label: '価格' },
+                    { name: 'desc', type: 'string', label: '説明', optional: true },
+                    { name: 'qty', type: 'number', label: '在庫', defaultValue: 1 },
+                ]
+            },
+            buy_listing: {
+                description: '出品されている権利を購入します。',
+                params: [{ name: 'listingId', type: 'listing_id', label: '出品' }]
+            },
+            delete_listing: {
+                description: '購入されていない出品を削除します。',
+                params: [{ name: 'listingId', type: 'listing_id', label: '出品' }]
+            },
+            buyer_request: {
+                description: '購入した権利の実行を申請します。',
+                params: [{ name: 'rightId', type: 'right_id', label: '権利' }]
+            },
+            seller_respond: {
+                description: '実行申請に対して応答します。',
+                params: [
+                    { name: 'rightId', type: 'right_id', label: '権利' },
+                    { name: 'action', type: 'select', label: 'アクション', options: ['exec', 'cancel'] },
+                ]
+            },
+        };
 
-    <div id="data-container">
-        <div class="data-box">
-            <h2>サーバー情報 (リアルタイム)</h2>
-            <pre id="server-state">ここにサーバーの完全な状態が表示されます...</pre>
-        </div>
-        <div class="data-box">
-            <h2>接続ユーザーと他端末</h2>
-            <pre id="users-info">ここにユーザーリストと接続情報が表示されます...</pre>
-        </div>
-    </div>
+        function App() {
+            const [settings, setSettings] = useState(() => {
+                try {
+                    return JSON.parse(localStorage.getItem('trpg_sync_kv_test_page') || '{}');
+                } catch {
+                    return { url: '', room: '', key: '' };
+                }
+            });
+            const [status, setStatus] = useState({ connected: false, message: '未接続' });
+            const [serverState, setServerState] = useState({});
+            const [logs, setLogs] = useState([]);
+            const [activeTab, setActiveTab] = useState('builder');
 
-    <div class="data-box" style="margin-top: 20px;">
-        <h2>操作の偽装 (Impersonate)</h2>
-        <div id="impersonate-controls">
-            <div style="display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center;">
-                <label for="user-select">なりすますユーザー:</label>
-                <select id="user-select"></select>
+            const addLog = useCallback((type, message) => {
+                setLogs(prev => [{ type, message, ts: new Date() }, ...prev.slice(0, 99)]);
+            }, []);
 
-                <label for="op-select">操作テンプレート:</label>
-                <select id="op-select"></select>
+            const handleSettingChange = (key, value) => {
+                setSettings(prev => ({ ...prev, [key]: value }));
+            };
+
+            const connect = useCallback(async () => {
+                if (!settings.url || !settings.room || !settings.key) {
+                    setStatus({ connected: false, message: '設定が不完全です' });
+                    return;
+                }
+                localStorage.setItem('trpg_sync_kv_test_page', JSON.stringify(settings));
+                setStatus({ connected: true, message: 'データを取得中...' });
+                addLog('info', `接続試行: ${settings.room}`);
+
+                try {
+                    const url = new URL(settings.url);
+                    url.searchParams.set('room', settings.room);
+                    url.searchParams.set('key', settings.key);
+
+                    const res = await fetch(url.toString());
+                    if (res.status === 204) {
+                        setStatus({ connected: true, message: 'サーバーに変更なし' });
+                        return;
+                    }
+                    if (!res.ok) throw new Error(`サーバーエラー: ${res.status}`);
+
+                    const data = await res.json();
+                    setServerState(data.state || {});
+                    setStatus({ connected: true, message: `接続中 (最終更新: ${new Date(data.lastUpdate).toLocaleTimeString()})` });
+                    addLog('recv', 'サーバー状態を受信');
+                } catch (error) {
+                    setStatus({ connected: false, message: `エラー: ${error.message}` });
+                    addLog('error', `接続失敗: ${error.message}`);
+                }
+            }, [settings, addLog]);
+
+            const sendOperation = useCallback(async (operation) => {
+                if (!status.connected) {
+                    addLog('error', '未接続のため操作を送信できません。');
+                    return;
+                }
+                addLog('sent', `操作送信: ${operation.type}`);
+                try {
+                    const url = new URL(settings.url);
+                    url.searchParams.set('room', settings.room);
+                    url.searchParams.set('key', settings.key);
+                    const res = await fetch(url.toString(), {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ operations: [operation] }),
+                    });
+                    if (!res.ok) {
+                        const errorText = await res.text();
+                        throw new Error(`${res.status} - ${errorText}`);
+                    }
+                    const result = await res.json();
+                    addLog('recv', '操作成功');
+                    if (result.newState) setServerState(result.newState);
+                } catch (error) {
+                    addLog('error', `操作失敗: ${error.message}`);
+                }
+            }, [status.connected, settings, addLog]);
+
+            return (
+                <div className="app-container">
+                    <header className="app-header">
+                        <h1>高機能テストクライアント <span className="highlight">v2.0</span></h1>
+                        <a href="index.html" style={{color: 'var(--accent-color)'}}>メインページに戻る</a>
+                    </header>
+                    <aside className="app-sidebar">
+                        <ConnectionPanel settings={settings} onSettingChange={handleSettingChange} onConnect={connect} status={status} />
+                        <OperationBuilder serverState={serverState} onSendOperation={sendOperation} />
+                    </aside>
+                    <main className="app-main">
+                        <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />
+                        {activeTab === 'builder' && <LogPanel logs={logs} />}
+                        {activeTab === 'state' && <JsonViewer data={serverState} />}
+                        {activeTab === 'users' && <UsersPanel users={serverState.users || []} />}
+                    </main>
+                    <footer className="app-footer">
+                        <span className={`status-indicator ${status.connected ? 'connected' : ''}`}></span>
+                        {status.message}
+                    </footer>
+                </div>
+            );
+        }
+
+        const ConnectionPanel = ({ settings, onSettingChange, onConnect, status }) => (
+            <div className="panel">
+                <h2>接続設定</h2>
+                <div className="form-grid">
+                    <label htmlFor="syncUrl">URL</label>
+                    <input id="syncUrl" type="text" value={settings.url || ''} onChange={e => onSettingChange('url', e.target.value)} />
+                    <label htmlFor="syncRoom">ルーム名</label>
+                    <input id="syncRoom" type="text" value={settings.room || ''} onChange={e => onSettingChange('room', e.target.value)} />
+                    <label htmlFor="syncKey">ルーム鍵</label>
+                    <input id="syncKey" type="text" value={settings.key || ''} onChange={e => onSettingChange('key', e.target.value)} />
+                    <div className="full-width">
+                        <button onClick={onConnect} disabled={!settings.url || !settings.room || !settings.key}>
+                            {status.connected ? '状態を再取得' : '接続'}
+                        </button>
+                    </div>
+                </div>
             </div>
+        );
 
-            <div id="dynamic-form-container" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
-                <!-- パラメータのフォームはここに動的に生成されます -->
+        const OperationBuilder = ({ serverState, onSendOperation }) => {
+            const [selectedOp, setSelectedOp] = useState('');
+            const [impersonatedUser, setImpersonatedUser] = useState('');
+            const [formState, setFormState] = useState({});
+
+            useEffect(() => {
+                if (serverState.users && serverState.users.length > 0 && !impersonatedUser) {
+                    setImpersonatedUser(serverState.users[0].id);
+                }
+            }, [serverState.users, impersonatedUser]);
+
+            const handleOpChange = (e) => {
+                const opName = e.target.value;
+                setSelectedOp(opName);
+                const params = SCHEMAS[opName]?.params || [];
+                const newFormState = {};
+                params.forEach(p => {
+                    newFormState[p.name] = p.defaultValue ?? '';
+                });
+                setFormState(newFormState);
+            };
+
+            const handleFormChange = (name, value) => {
+                setFormState(prev => ({...prev, [name]: value}));
+            };
+
+            const handleSubmit = () => {
+                const operation = {
+                    id: 'op_' + Math.random().toString(36).slice(2) + '_' + Date.now(),
+                    type: selectedOp,
+                    data: { ...formState },
+                    timestamp: Date.now(),
+                    userId: impersonatedUser,
+                    clientId: 'client_' + Math.random().toString(36).slice(2),
+                    sessionId: 'session_' + Math.random().toString(36).slice(2),
+                };
+                onSendOperation(operation);
+            };
+
+            const schema = SCHEMAS[selectedOp];
+
+            return (
+                <div className="panel">
+                    <h2>操作ビルダー</h2>
+                    <div className="form-grid">
+                        <label htmlFor="impersonateUser">実行ユーザー</label>
+                        <select id="impersonateUser" value={impersonatedUser} onChange={e => setImpersonatedUser(e.target.value)}>
+                            {(serverState.users || []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+
+                        <label htmlFor="opSelect">操作テンプレート</label>
+                        <select id="opSelect" value={selectedOp} onChange={handleOpChange}>
+                            {Object.entries(SCHEMAS).map(([key, { description }]) => <option key={key} value={key}>{key || '選択...'}</option>)}
+                        </select>
+                    </div>
+                    {schema && schema.params.length > 0 && (
+                        <div className="form-grid" style={{marginTop: '15px', borderTop: '1px solid var(--border-color)', paddingTop: '15px'}}>
+                            {schema.params.map(param => {
+                                const id = `param-${param.name}`;
+                                let input;
+                                if (param.type === 'user_id' || param.type === 'listing_id' || param.type === 'right_id') {
+                                    const items = serverState[param.type.replace('_id', 's')] || [];
+                                    input = (
+                                        <select id={id} value={formState[param.name] || ''} onChange={e => handleFormChange(param.name, e.target.value)}>
+                                            <option value="">選択...</option>
+                                            {items.map(item => <option key={item.id} value={item.id}>{item.title || item.name}</option>)}
+                                        </select>
+                                    );
+                                } else if (param.type === 'select') {
+                                    input = (
+                                      <select id={id} value={formState[param.name] || ''} onChange={e => handleFormChange(param.name, e.target.value)}>
+                                        {param.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                      </select>
+                                    );
+                                } else {
+                                    input = <input type={param.type} id={id} value={formState[param.name] || ''} onChange={e => handleFormChange(param.name, e.target.value)} />;
+                                }
+                                return <React.Fragment key={param.name}><label htmlFor={id}>{param.label}</label>{input}</React.Fragment>;
+                            })}
+                        </div>
+                    )}
+                    <div className="full-width" style={{marginTop: '20px'}}>
+                        <button onClick={handleSubmit} disabled={!selectedOp || !impersonatedUser}>操作を送信</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const Tabs = ({ activeTab, setActiveTab }) => {
+            const tabs = [{id: 'builder', label: '操作ログ'}, {id: 'state', label: 'サーバー状態'}, {id: 'users', label: '詳細ビュー'}];
+            return (
+                <div className="tabs">
+                    {tabs.map(tab => <div key={tab.id} className={`tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>{tab.label}</div>)}
+                </div>
+            );
+        };
+
+        const LogPanel = ({ logs }) => (
+            <div className="log-panel">
+                {logs.map((log, i) => (
+                    <div key={i} className="log-entry">
+                        <span className="timestamp">{log.ts.toLocaleTimeString()}</span>
+                        <span className={`type-${log.type}`}>{log.type.toUpperCase()}:</span>
+                        <span> {log.message}</span>
+                    </div>
+                ))}
             </div>
+        );
 
-            <button id="send-op-btn" style="margin-top: 15px;">偽装した操作を送信</button>
-            <span id="op-status" style="margin-left: 10px;"></span>
-        </div>
-    </div>
+        const JsonViewer = ({ data }) => {
+            const createMarkup = (json) => {
+                if (typeof json !== 'string') {
+                    json = JSON.stringify(json, undefined, 2);
+                }
+                json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
+                    let cls = 'number';
+                    if (/^"/.test(match)) {
+                        if (/:$/.test(match)) {
+                            cls = 'key';
+                        } else {
+                            cls = 'string';
+                        }
+                    } else if (/true|false/.test(match)) {
+                        cls = 'boolean';
+                    } else if (/null/.test(match)) {
+                        cls = 'null';
+                    }
+                    return `<span class="${cls}">${match}</span>`;
+                });
+            };
+            return <pre className="json-viewer" dangerouslySetInnerHTML={{ __html: createMarkup(data) }} />;
+        };
 
-    <script src="test.js"></script>
+        const UsersPanel = ({ users }) => (
+            <div className="panel">
+                <h2>ユーザー一覧</h2>
+                <div className="form-grid" style={{fontWeight: 'bold', borderBottom: '1px solid var(--border-color)', paddingBottom: '5px'}}>
+                    <span>名前</span>
+                    <span>残高</span>
+                </div>
+                {users.map(user => (
+                    <div key={user.id} className="form-grid" style={{borderBottom: '1px solid var(--border-color)', padding: '5px 0'}}>
+                        <span>{user.name}</span>
+                        <span style={{color: 'var(--green)'}}>{user.balance.toLocaleString()} coin</span>
+                    </div>
+                ))}
+            </div>
+        );
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 </body>
 </html>
