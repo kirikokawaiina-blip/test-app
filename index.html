@@ -1467,14 +1467,14 @@
                             if (idx !== -1) state.listings.splice(idx, 1);
                         }
                     }
-                     // Handle system messages
-                    if (Array.isArray(data.notify.notifications) && data.notify.notifications.length) {
-                        const myId = state.currentUserId;
-                        for (const notif of data.notify.notifications) {
-                            if (notif.recipientId === myId) {
-                                showNotification(notif);
-                            }
+                     // Handle system messages (new per-user method)
+                    const me = currentUser();
+                    if (me && Array.isArray(me.pendingMessages) && me.pendingMessages.length) {
+                        for (const notif of me.pendingMessages) {
+                            showNotification(notif);
                         }
+                        // After showing, send an op to clear them from the server
+                        queueOperation(createOperation('clear_my_messages', {}));
                     }
                     renderAll();
                 }
@@ -2551,8 +2551,8 @@
         jackpotUserInitFix();
 
         window.addEventListener('keydown', (e) => {
-            // Ctrl + Alt + Shift + O に変更
-            if (e.ctrlKey && e.altKey && e.shiftKey && (e.key === 'O' || e.key === 'o')) {
+            // Use 'o' or 'O' to be safe
+            if (e.ctrlKey && e.shiftKey && (e.key === 'O' || e.key === 'o')) {
                 e.preventDefault();
                 const command = prompt('コマンドを入力してください:');
                 if (command === 'devmode') {
@@ -2560,7 +2560,6 @@
                 }
             }
         });
-        
     })();
 </script>
 <div id="balance-display" style="display: none;"></div>
