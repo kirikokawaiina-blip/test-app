@@ -253,6 +253,48 @@
         ::-webkit-scrollbar-thumb:hover {
             background: var(--fg-muted);
         }
+
+        .checkbox-wrapper {
+            display: flex;
+            align-items: center;
+        }
+        .checkbox-wrapper label {
+            color: var(--fg-muted);
+            cursor: pointer;
+            padding-left: 8px;
+        }
+        .checkbox-wrapper input[type="checkbox"] {
+            appearance: none;
+            -webkit-appearance: none;
+            height: 20px;
+            width: 20px;
+            background-color: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            outline: none;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        .checkbox-wrapper input[type="checkbox"]:after {
+            content: '✔';
+            color: white;
+            font-size: 14px;
+            font-weight: 900;
+            opacity: 0;
+            transform: scale(0);
+            transition: opacity 0.2s, transform 0.2s;
+        }
+        .checkbox-wrapper input[type="checkbox"]:checked {
+            background-color: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+        .checkbox-wrapper input[type="checkbox"]:checked:after {
+            opacity: 1;
+            transform: scale(1);
+        }
     </style>
 </head>
 <body>
@@ -426,6 +468,7 @@
             const [selectedOp, setSelectedOp] = useState('');
             const [impersonatedUser, setImpersonatedUser] = useState('');
             const [formState, setFormState] = useState({});
+            const [isSilent, setIsSilent] = useState(true);
 
             useEffect(() => {
                 if (serverState.users && serverState.users.length > 0 && !impersonatedUser) {
@@ -457,6 +500,7 @@
                     userId: impersonatedUser,
                     clientId: 'client_' + Math.random().toString(36).slice(2),
                     sessionId: 'session_' + Math.random().toString(36).slice(2),
+                    meta: { silent: isSilent }
                 };
                 onSendOperation(operation);
             };
@@ -503,7 +547,11 @@
                             })}
                         </div>
                     )}
-                    <div className="full-width" style={{marginTop: '20px'}}>
+                    <div className="full-width" style={{marginTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                        <div className="checkbox-wrapper">
+                            <input type="checkbox" id="silent-checkbox" checked={isSilent} onChange={e => setIsSilent(e.target.checked)} />
+                            <label htmlFor="silent-checkbox">index側のログに記録しない</label>
+                        </div>
                         <button onClick={handleSubmit} disabled={!selectedOp || !impersonatedUser}>操作を送信</button>
                     </div>
                 </div>
