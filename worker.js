@@ -263,6 +263,10 @@ async function applyOperation(state, operation) {
       return applyBuyerFinalize(state, data, timestamp, userId, meta);
     case "send_message":
       return applySendMessage(state, data, timestamp);
+    case "delete_user":
+      return applyDeleteUser(state, data);
+    case "clear_logs":
+        return applyClearLogs(state);
     default:
       return { conflict: true, conflictType: "unknown_operation", message: "Unknown operation type: " + type };
   }
@@ -285,6 +289,27 @@ function applySendMessage(state, data, timestamp) {
         type,
         isHtml: isHtml || false
     });
+    return { conflict: false };
+}
+
+// 管理者アクション: ユーザー削除
+function applyDeleteUser(state, data) {
+    const { userId } = data;
+    if (!userId) {
+        return { conflict: true, conflictType: 'bad_request', message: 'userId is required for delete_user.' };
+    }
+    const userIndex = state.users.findIndex(u => u.id === userId);
+    if (userIndex === -1) {
+        return { conflict: true, conflictType: 'user_not_found', message: `User with id ${userId} not found.`};
+    }
+    state.users.splice(userIndex, 1);
+    // Note: This is a simple deletion. It doesn't handle cleaning up listings, rights, or transactions associated with the user.
+    return { conflict: false };
+}
+
+// 管理者アクション: ログ削除
+function applyClearLogs(state) {
+    state.txs = [];
     return { conflict: false };
 }
 

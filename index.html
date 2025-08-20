@@ -2046,8 +2046,16 @@
             list.innerHTML = '';
             state.users.forEach(u => {
                 const row = document.createElement('div');
-                row.style.cssText = 'padding:8px 10px;border:1px solid #60efff22;border-radius:10px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;background:#0e1836';
+                row.style.cssText = 'padding:8px 10px;border:1px solid #60efff22;border-radius:10px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;background:#0e1836; cursor: pointer;';
                 row.innerHTML = '<div style="font-weight:750">' + u.name + (u.id === state.currentUserId ? '（自分）' : '') + '</div><div class="pill">' + coins(u.balance) + '</div>';
+
+                if (!isJackpot(u)) {
+                    row.addEventListener('click', () => {
+                        els.loginName.value = u.name;
+                        els.loginPass.focus();
+                    });
+                }
+
                 list.appendChild(row);
             });
         }

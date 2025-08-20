@@ -432,13 +432,14 @@
                     <aside className="app-sidebar">
                         <ConnectionPanel settings={settings} onSettingChange={handleSettingChange} onConnect={connect} status={status} />
                         <OperationBuilder serverState={serverState} onSendOperation={sendOperation} />
-                        <MessagingPanel users={serverState.users} onSendOperation={sendOperation} />
+                        <MessagingPanel users={serverState.users || []} onSendOperation={sendOperation} />
                     </aside>
                     <main className="app-main">
                         <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />
                         {activeTab === 'logs' && <LogPanel logs={logs} />}
                         {activeTab === 'state' && <JsonViewer data={serverState} />}
                         {activeTab === 'analytics' && <AnalyticsPanel serverState={serverState} />}
+                        {activeTab === 'admin' && <AdminPanel users={serverState.users || []} onSendOperation={sendOperation} />}
                     </main>
                     <footer className="app-footer">
                         <span className={`status-indicator ${status.connected ? 'connected' : ''}`}></span>
@@ -562,7 +563,7 @@
         };
 
         const Tabs = ({ activeTab, setActiveTab }) => {
-            const tabs = [{id: 'logs', label: '操作ログ'}, {id: 'state', label: 'サーバー状態'}, {id: 'analytics', label: '分析'}];
+            const tabs = [{id: 'logs', label: '操作ログ'}, {id: 'state', label: 'サーバー状態'}, {id: 'analytics', label: '分析'}, {id: 'admin', label: '管理'}];
             return (
                 <div className="tabs">
                     {tabs.map(tab => <div key={tab.id} className={`tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>{tab.label}</div>)}
@@ -681,6 +682,49 @@
 
                         <div className="full-width" style={{gridColumn: '1 / -1'}}>
                             <button onClick={handleSend} disabled={!recipientId || !content}>送信</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AdminPanel = ({ users = [], onSendOperation }) => {
+            const [selectedUser, setSelectedUser] = useState('');
+
+            useEffect(() => {
+                if (!selectedUser && users.length > 0) {
+                    setSelectedUser(users[0].id);
+                }
+            }, [users, selectedUser]);
+
+            const handleDeleteUser = () => {
+                if (!selectedUser || !confirm(`${users.find(u=>u.id===selectedUser)?.name} を本当に削除しますか？この操作は元に戻せません。`)) return;
+                onSendOperation({ type: 'delete_user', data: { userId: selectedUser } });
+            };
+
+            const handleClearLogs = () => {
+                if (!confirm('本当にすべての取引ログを削除しますか？この操作は元に戻せません。')) return;
+                onSendOperation({ type: 'clear_logs', data: {} });
+            };
+
+            return (
+                <div className="panel">
+                    <h2>管理アクション</h2>
+                    <div className="form-grid" style={{gap: '20px'}}>
+                        <div>
+                            <label>ユーザーの削除</label>
+                            <div style={{display: 'flex', gap: '10px', marginTop: '5px'}}>
+                                <select value={selectedUser} onChange={e => setSelectedUser(e.target.value)} style={{flex: 1}}>
+                                    {users.filter(u => u.name !== 'ジャックポット').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                </select>
+                                <button onClick={handleDeleteUser} style={{backgroundColor: 'var(--red)'}} disabled={!selectedUser}>削除実行</button>
+                            </div>
+                        </div>
+                        <div>
+                           <label>ログの削除</label>
+                            <div style={{marginTop: '5px'}}>
+                                <button onClick={handleClearLogs} style={{backgroundColor: 'var(--red)'}}>全取引ログを削除</button>
+                            </div>
                         </div>
                     </div>
                 </div>
