@@ -2551,8 +2551,8 @@
         jackpotUserInitFix();
 
         window.addEventListener('keydown', (e) => {
-            // Use 'o' or 'O' to be safe
-            if (e.ctrlKey && e.shiftKey && (e.key === 'O' || e.key === 'o')) {
+            // Ctrl + Alt + Shift + O に変更
+            if (e.ctrlKey && e.altKey && e.shiftKey && (e.key === 'O' || e.key === 'o')) {
                 e.preventDefault();
                 const command = prompt('コマンドを入力してください:');
                 if (command === 'devmode') {
@@ -2560,6 +2560,7 @@
                 }
             }
         });
+        
     })();
 </script>
 <div id="balance-display" style="display: none;"></div>
