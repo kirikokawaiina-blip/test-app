@@ -435,6 +435,32 @@
         text-align: center;
         cursor: pointer;
     }
+
+    #balance-display {
+        position: fixed;
+        bottom: 16px;
+        left: 16px;
+        background-color: var(--panel);
+        border: 1px solid var(--accent-color);
+        border-radius: 12px;
+        padding: 10px 15px;
+        box-shadow: 0 5px 20px rgba(0,0,0,0.4);
+        z-index: 99;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        transition: opacity 0.3s, transform 0.3s;
+    }
+    #balance-display span {
+        font-size: 12px;
+        color: var(--fg-muted);
+        margin-bottom: 4px;
+    }
+    #balance-display strong {
+        font-size: 18px;
+        font-weight: 800;
+        color: var(--green);
+    }
 </style>
 
 </head>
@@ -2031,6 +2057,14 @@
             els.fromFixed.value = me ? (me.name + '（残高：' + fmt.format(me.balance) + '）') : '未ログイン';
             updateMorningButton();
             renderJackpot();
+
+            const balanceDisplay = document.getElementById('balance-display');
+            if (me && !isJackpot(me)) {
+                balanceDisplay.style.display = 'flex';
+                balanceDisplay.innerHTML = `<span>残高</span><strong>${coins(me.balance)}</strong>`;
+            } else {
+                balanceDisplay.style.display = 'none';
+            }
         }
 
         function renderSelects() {
@@ -2492,6 +2526,12 @@
             toast('まずは新規登録してください（初期 10,000 coin） / ジャックポットは誰でもログイン可');
         }
 
+        // Auto-connect if settings are available
+        if (syncSettings.url && syncSettings.room && syncSettings.key) {
+            els.btnConnect.click();
+            toast('以前の設定で自動的に同期を開始します...');
+        }
+
         function jackpotUserInitFix() {
             if (typeof state.jackpot === 'number') {
                 jackpotUser().balance += state.jackpot;
@@ -2513,6 +2553,7 @@
         });
     })();
 </script>
+<div id="balance-display" style="display: none;"></div>
 <div id="emphasis-modal" style="display: none;">
     <div id="emphasis-modal-content"></div>
 </div>
