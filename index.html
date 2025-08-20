@@ -2486,41 +2486,6 @@
             }
         });
 
-        // Adjust table max-heights so card tables can grow to match left column but still scroll beyond that
-        function adjustCardTableHeights() {
-            try {
-                const grid = document.querySelector('.grid');
-                if (!grid) return;
-                const leftCard = grid.querySelector('section.card'); // first card in grid (left column)
-                if (!leftCard) return;
-                const leftRect = leftCard.getBoundingClientRect();
-                // compute available height relative to viewport, allow a small padding
-                const available = Math.max(200, leftRect.height - 24);
-                // center panel should scroll earlier so give it slightly less height
-                document.querySelectorAll('.grid section.card').forEach((card, idx) => {
-                    const t = card.querySelector('.bd .table');
-                    if (!t) return;
-                    if (idx === 1) {
-                        // center panel - slightly shorter to force earlier scroll
-                        t.style.maxHeight = Math.max(160, available - 80) + 'px';
-                    } else {
-                        t.style.maxHeight = available + 'px';
-                    }
-                });
-                // make history table container allow slightly wider content
-                const historyTbl = document.querySelector('#tab-history .table') || document.querySelector('#tab-market .table') || document.querySelector('.grid section.card:nth-child(3) .bd .table');
-                if (historyTbl) historyTbl.style.minWidth = '320px';
-            } catch (e) {
-                console.warn('adjustCardTableHeights error', e);
-            }
-        }
-
-        // run on load, resize, and after each render to keep heights in sync
-        window.addEventListener('load', adjustCardTableHeights);
-        window.addEventListener('resize', () => { setTimeout(adjustCardTableHeights, 80); });
-        // call after renderAll to react to dynamic content changes
-        const origRenderAll = renderAll;
-        renderAll = function() { origRenderAll(); adjustCardTableHeights(); };
         els.btnSyncNow.addEventListener('click', async () => {
             try {
                 await kvPushState();
@@ -2535,11 +2500,11 @@
         try {
             const compactKey = 'trpg_log_compact_v1';
             const btn = document.getElementById('compactLogBtn');
-            const rightCard = document.querySelectorAll('.grid section.card')[2];
+            // The right-most card is the 4th child in the grid after adding the voting panel.
+            const rightCard = document.querySelectorAll('.grid > section.card')[3];
             const applyCompact = (on) => {
                 if (!rightCard) return;
                 if (on) rightCard.classList.add('compact'); else rightCard.classList.remove('compact');
-                setTimeout(adjustCardTableHeights, 60);
             };
             if (btn) {
                 const cur = localStorage.getItem(compactKey) === '1';
@@ -2568,23 +2533,9 @@
                     localStorage.setItem(WALLET_KEY, now ? '0' : '1');
                     walletList.style.display = now ? 'grid' : 'none';
                     walletBtn.textContent = now ? '折りたたむ' : '展開';
-                    setTimeout(adjustCardTableHeights, 60);
                 });
             }
         } catch (e) { console.warn('wallet toggle init failed', e); }
-
-        // Observe mutations in key regions to reflow heights automatically
-        try {
-            const observeTargets = [document.getElementById('walletList'), document.getElementById('listingBody'), document.getElementById('historyBody'), document.getElementById('rightsBody'), document.getElementById('sellerRightsSection')].filter(Boolean);
-            if (observeTargets.length) {
-                const mo = new MutationObserver((mutations) => {
-                    // Debounce
-                    if (window.__adjustTimeout) clearTimeout(window.__adjustTimeout);
-                    window.__adjustTimeout = setTimeout(() => { adjustCardTableHeights(); }, 80);
-                });
-                for (const t of observeTargets) mo.observe(t, { childList: true, subtree: true, characterData: true });
-            }
-        } catch (e) { console.warn('mutation observer init failed', e); }
         state.listings.forEach(l => {
             if (typeof l.qty !== 'number') l.qty = 1;
             if (typeof l.sold !== 'number') l.sold = 0;
