@@ -1,313 +1,944 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TRPGトークン | v15 (React)</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高機能同期テストクライアント</title>
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         :root {
-            --font-primary: 'Helvetica Neue', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            --bg-color: #1a1b26;
+            --bg-secondary: #24283b;
+            --bg-tertiary: #414868;
+            --fg-color: #c0caf5;
+            --fg-muted: #a9b1d6;
+            --accent-color: #7aa2f7;
+            --accent-secondary: #bb9af7;
+            --green: #9ece6a;
+            --red: #f7768e;
+            --orange: #ff9e64;
+            --border-color: #3b3f5b;
+            --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
             --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-            --bg-dark-1: #16161e; --bg-dark-2: #1a1b26; --bg-dark-3: #24283b; --bg-dark-4: #414868;
-            --fg-light-1: #c0caf5; --fg-light-2: #a9b1d6; --fg-light-3: #787c99;
-            --accent-blue: #7aa2f7; --accent-cyan: #7dcfff; --accent-purple: #bb9af7;
-            --accent-green: #9ece6a; --accent-yellow: #e0af68; --accent-red: #f7768e;
-            --border-radius: 8px; --transition-speed: 0.3s;
         }
-        * { box-sizing: border-box; }
-        html, body, #root { height: 100%; margin: 0; padding: 0; overflow: hidden; }
-        body { background-color: var(--bg-dark-1); color: var(--fg-light-1); font-family: var(--font-primary); font-size: 15px; -webkit-font-smoothing: antialiased; }
-        #root { display: flex; transition: background-color var(--transition-speed); }
-        .app-container, .login-screen { width: 100%; height: 100%; }
-        .login-screen { display: flex; justify-content: center; align-items: center; background: linear-gradient(160deg, var(--bg-dark-2), var(--bg-dark-1)); }
-        .login-box { background-color: var(--bg-dark-2); padding: 40px; border-radius: var(--border-radius); box-shadow: 0 15px 40px rgba(0,0,0,0.5); border: 1px solid var(--bg-dark-4); width: 100%; max-width: 400px; text-align: center; }
-        .login-box h1 { color: var(--accent-purple); margin-bottom: 30px; }
-        .input-group { margin-bottom: 20px; text-align: left; }
-        .input-group label { display: block; margin-bottom: 8px; color: var(--fg-light-2); font-size: 0.9em; }
-        .input-group input, .input-group select, .input-group textarea { width: 100%; padding: 12px; background-color: var(--bg-dark-1); border: 1px solid var(--bg-dark-4); border-radius: var(--border-radius); color: var(--fg-light-1); font-size: 1em; transition: all var(--transition-speed); }
-        .input-group input:focus, .input-group select:focus, .input-group textarea:focus { outline: none; border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(122, 162, 247, 0.3); }
-        .btn { padding: 10px 15px; border-radius: var(--border-radius); border: none; background: linear-gradient(145deg, var(--accent-blue), var(--accent-purple)); color: white; font-size: 1em; font-weight: 600; cursor: pointer; transition: all var(--transition-speed); }
-        .btn-secondary { background: var(--bg-dark-3); }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.3); }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
-        .toggle-form { margin-top: 25px; font-size: 0.9em; color: var(--fg-light-3); }
-        .toggle-form span { color: var(--accent-cyan); cursor: pointer; font-weight: 600; }
-        .dashboard { display: grid; grid-template-columns: 320px 1fr 400px; grid-template-rows: auto 1fr; height: 100vh; gap: 1px; background-color: var(--bg-dark-4); }
-        .dashboard-header { grid-column: 1 / -1; background-color: var(--bg-dark-2); padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--bg-dark-4); }
-        .dashboard-header h1 { font-size: 1.2em; margin: 0; }
-        .user-badge { background-color: var(--bg-dark-3); padding: 8px 12px; border-radius: var(--border-radius); font-size: 0.9em; }
-        .dashboard-left, .dashboard-main, .dashboard-right { overflow-y: auto; padding: 20px; background-color: var(--bg-dark-2); }
-        .dashboard-main { background-color: var(--bg-dark-1); }
-        .panel { background-color: var(--bg-dark-2); border: 1px solid var(--bg-dark-4); border-radius: var(--border-radius); padding: 20px; margin-bottom: 20px; }
-        .panel h2 { margin-top: 0; color: var(--accent-purple); font-size: 1.1em; border-bottom: 1px solid var(--bg-dark-4); padding-bottom: 10px; margin-bottom: 15px;}
-        .wallet-list-item { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-radius: 4px; transition: background-color var(--transition-speed); }
-        .wallet-list-item:hover { background-color: var(--bg-dark-3); }
-        .history-item { font-size: 0.9em; padding: 8px 0; border-bottom: 1px solid var(--bg-dark-4); }
-        .history-item:last-child { border-bottom: none; }
-        .action-tabs { display: flex; border-bottom: 1px solid var(--bg-dark-4); margin-bottom: 15px; }
-        .action-tab { padding: 10px 15px; cursor: pointer; color: var(--fg-light-2); border-bottom: 2px solid transparent; }
-        .action-tab.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
-        .form-grid { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; }
-        .form-grid .full-width { grid-column: 1 / -1; }
-        ::-webkit-scrollbar { width: 10px; height: 10px; }
-        ::-webkit-scrollbar-track { background: var(--bg-dark-1); }
-        ::-webkit-scrollbar-thumb { background: var(--bg-dark-4); border-radius: 5px; border: 2px solid var(--bg-dark-1); }
-        ::-webkit-scrollbar-thumb:hover { background: var(--fg-light-3); }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body, #root {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--fg-color);
+            font-family: var(--font-family);
+            font-size: 14px;
+            overflow: hidden;
+        }
+
+        #root {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .app-container {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            grid-template-rows: auto 1fr auto;
+            grid-template-areas:
+                "header header"
+                "sidebar main"
+                "footer footer";
+            height: 100vh;
+            gap: 1px;
+            background-color: var(--border-color);
+        }
+
+        .app-header {
+            grid-area: header;
+            background-color: var(--bg-secondary);
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .app-header h1 {
+            margin: 0;
+            font-size: 1.2em;
+            color: var(--fg-color);
+        }
+        .app-header h1 .highlight {
+            color: var(--accent-secondary);
+        }
+
+        .app-sidebar {
+            grid-area: sidebar;
+            background-color: var(--bg-secondary);
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .app-main {
+            grid-area: main;
+            background-color: var(--bg-color);
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .app-footer {
+            grid-area: footer;
+            background-color: var(--bg-secondary);
+            padding: 8px 20px;
+            border-top: 1px solid var(--border-color);
+            font-size: 0.8em;
+            text-align: center;
+            color: var(--fg-muted);
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+            background-color: var(--red);
+        }
+        .status-indicator.connected {
+            background-color: var(--green);
+        }
+
+        .panel {
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .panel h2 {
+            margin-top: 0;
+            font-size: 1.1em;
+            color: var(--accent-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 12px;
+            align-items: center;
+        }
+        .form-grid label {
+            font-weight: 600;
+            color: var(--fg-muted);
+        }
+        .form-grid .full-width {
+            grid-column: 1 / -1;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            background-color: var(--bg-secondary);
+            color: var(--fg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            padding: 8px 10px;
+            font-family: var(--font-family);
+            font-size: 1em;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px var(--accent-color-translucent, rgba(122, 162, 247, 0.3));
+        }
+
+        textarea {
+            font-family: var(--font-mono);
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        button {
+            background: linear-gradient(145deg, var(--accent-color), #567afc);
+            color: #fff;
+            font-weight: 600;
+            border: none;
+            border-radius: 5px;
+            padding: 10px 15px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        button:hover {
+            opacity: 0.9;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: var(--fg-muted);
+            margin-bottom: -1px; /* Overlap border */
+        }
+        .tab.active {
+            color: var(--accent-color);
+            border-bottom-color: var(--accent-color);
+        }
+
+        .json-viewer {
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+            white-space: pre;
+            background-color: var(--bg-secondary);
+            padding: 15px;
+            border-radius: 5px;
+            overflow: auto;
+            max-height: 60vh;
+        }
+        .json-viewer .key { color: var(--accent-secondary); }
+        .json-viewer .string { color: var(--green); }
+        .json-viewer .number { color: var(--orange); }
+        .json-viewer .boolean { color: var(--red); }
+        .json-viewer .null { color: var(--fg-muted); }
+
+        .log-panel {
+            background-color: var(--bg-secondary);
+            border-radius: 5px;
+            padding: 15px;
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .log-entry:last-child { border-bottom: none; }
+        .log-entry .timestamp { color: var(--fg-muted); margin-right: 10px; }
+        .log-entry .type-sent { color: var(--orange); }
+        .log-entry .type-recv { color: var(--green); }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-color);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--fg-muted);
+        }
+
+        .checkbox-wrapper {
+            display: flex;
+            align-items: center;
+        }
+        .checkbox-wrapper label {
+            color: var(--fg-muted);
+            cursor: pointer;
+            padding-left: 8px;
+        }
+        .checkbox-wrapper input[type="checkbox"] {
+            appearance: none;
+            -webkit-appearance: none;
+            height: 20px;
+            width: 20px;
+            background-color: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            outline: none;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        .checkbox-wrapper input[type="checkbox"]:after {
+            content: '✔';
+            color: white;
+            font-size: 14px;
+            font-weight: 900;
+            opacity: 0;
+            transform: scale(0);
+            transition: opacity 0.2s, transform 0.2s;
+        }
+        .checkbox-wrapper input[type="checkbox"]:checked {
+            background-color: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+        .checkbox-wrapper input[type="checkbox"]:checked:after {
+            opacity: 1;
+            transform: scale(1);
+        }
     </style>
 </head>
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useCallback, useMemo, useRef } = React;
+        const { useState, useEffect, useCallback, useMemo } = React;
 
-        const API = {
-            async sha256(text) { const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)); return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join(''); },
-            createOperation(type, data, userId) { return { id: `op_${Math.random().toString(36).slice(2)}_${Date.now()}`, type, data, timestamp: Date.now(), userId, clientId: 'client_main_v15' }; },
-            async fetchState(settings, lastSync) {
-                const url = new URL(settings.url);
-                url.searchParams.set('room', settings.room); url.searchParams.set('key', settings.key);
-                if (lastSync) url.searchParams.set('lastSync', lastSync);
-                const res = await fetch(url.toString());
-                if (res.status === 204) return null;
-                if (!res.ok) throw new Error(`サーバーエラー: ${res.status}`);
-                return res.json();
+        const SCHEMAS = {
+            '': { description: 'テンプレートを選択...', params: [] },
+            create_listing: {
+                description: '新しい権利を出品します。',
+                params: [
+                    { name: 'title', type: 'string', label: 'タイトル' },
+                    { name: 'price', type: 'number', label: '価格' },
+                    { name: 'desc', type: 'string', label: '説明', optional: true },
+                    { name: 'qty', type: 'number', label: '在庫', defaultValue: 1 },
+                ]
             },
-            async sendOperations(settings, operations) {
-                const url = new URL(settings.url);
-                url.searchParams.set('room', settings.room); url.searchParams.set('key', settings.key);
-                const res = await fetch(url.toString(), { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ operations }) });
-                if (!res.ok) { const txt = await res.text(); throw new Error(`操作送信失敗: ${res.status} ${txt}`); }
-                return res.json();
-            }
+            buy_listing: {
+                description: '出品されている権利を購入します。',
+                params: [{ name: 'listingId', type: 'listing_id', label: '出品' }]
+            },
+            delete_listing: {
+                description: '購入されていない出品を削除します。',
+                params: [{ name: 'listingId', type: 'listing_id', label: '出品' }]
+            },
+            buyer_request: {
+                description: '購入した権利の実行を申請します。',
+                params: [{ name: 'rightId', type: 'right_id', label: '権利' }]
+            },
+            seller_respond: {
+                description: '実行申請に対して応答します。',
+                params: [
+                    { name: 'rightId', type: 'right_id', label: '権利' },
+                    { name: 'action', type: 'select', label: 'アクション', options: ['exec', 'cancel'] },
+                ]
+            },
+            request_transfer_approval: {
+                description: '送金の承認をリクエストします。',
+                params: [
+                    { name: 'recipientId', type: 'user_id', label: '送信先' },
+                    { name: 'amount', type: 'number', label: '金額' },
+                    { name: 'memo', type: 'string', label: 'メモ', optional: true },
+                ]
+            },
         };
 
         function App() {
-            const [appState, setAppState] = useState({ state: null, currentUser: null, settings: {} });
-            const [error, setError] = useState('');
+            const [settings, setSettings] = useState(() => {
+                try {
+                    return JSON.parse(localStorage.getItem('trpg_sync_kv_test_page') || '{}');
+                } catch {
+                    return { url: '', room: '', key: '' };
+                }
+            });
+            const [status, setStatus] = useState({ connected: false, message: '未接続' });
+            const [serverState, setServerState] = useState({});
+            const [logs, setLogs] = useState([]);
+            const [activeTab, setActiveTab] = useState('logs');
+            const [impersonatedUser, setImpersonatedUser] = useState('');
 
-            const handleLogin = useCallback((user, state) => {
-                setAppState(s => ({...s, currentUser: user, state}));
-                localStorage.setItem('last_current_uid', user.id);
+            const addLog = useCallback((type, message) => {
+                setLogs(prev => [{ type, message, ts: new Date() }, ...prev.slice(0, 99)]);
             }, []);
 
-            useEffect(() => {
-                try {
-                    const settings = JSON.parse(localStorage.getItem('trpg_sync_kv') || '{}');
-                    const lastUserId = localStorage.getItem('last_current_uid');
-                    setAppState(s => ({...s, settings}));
-                    if (lastUserId && settings.url) {
-                        API.fetchState(settings).then(data => {
-                            if (data && data.state) {
-                                const user = data.state.users.find(u => u.id === lastUserId);
-                                if (user) handleLogin(user, data.state);
-                            }
-                        }).catch(err => setError(`自動ログイン失敗: ${err.message}`));
-                    }
-                } catch (e) { console.error("Initialization error:", e); setError("アプリの初期化に失敗しました。"); }
-            }, [handleLogin]);
-            
-            const handleLogout = () => {
-                setAppState(s => ({...s, currentUser: null}));
-                localStorage.removeItem('last_current_uid');
+            const handleSettingChange = (key, value) => {
+                setSettings(prev => ({ ...prev, [key]: value }));
             };
+
+            const connect = useCallback(async () => {
+                if (!settings.url || !settings.room || !settings.key) {
+                    setStatus({ connected: false, message: '設定が不完全です' });
+                    return;
+                }
+                localStorage.setItem('trpg_sync_kv_test_page', JSON.stringify(settings));
+                setStatus({ connected: true, message: 'データを取得中...' });
+                addLog('info', `接続試行: ${settings.room}`);
+
+                try {
+                    const url = new URL(settings.url);
+                    url.searchParams.set('room', settings.room);
+                    url.searchParams.set('key', settings.key);
+
+                    const res = await fetch(url.toString());
+                    if (res.status === 204) {
+                        setStatus({ connected: true, message: 'サーバーに変更なし' });
+                        return;
+                    }
+                    if (!res.ok) throw new Error(`サーバーエラー: ${res.status}`);
+
+                    const data = await res.json();
+                    setServerState(data.state || {});
+                    setStatus({ connected: true, message: `接続中 (最終更新: ${new Date(data.lastUpdate).toLocaleTimeString()})` });
+                    addLog('recv', 'サーバー状態を受信');
+                } catch (error) {
+                    setStatus({ connected: false, message: `エラー: ${error.message}` });
+                    addLog('error', `接続失敗: ${error.message}`);
+                }
+            }, [settings, addLog]);
+
+            const sendOperation = useCallback(async (operation) => {
+                if (!status.connected) {
+                    addLog('error', '未接続のため操作を送信できません。');
+                    return;
+                }
+                addLog('sent', `操作送信: ${operation.type}`);
+                try {
+                    const url = new URL(settings.url);
+                    url.searchParams.set('room', settings.room);
+                    url.searchParams.set('key', settings.key);
+                    const res = await fetch(url.toString(), {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ operations: [operation] }),
+                    });
+                    if (!res.ok) {
+                        const errorText = await res.text();
+                        throw new Error(`${res.status} - ${errorText}`);
+                    }
+                    const result = await res.json();
+                    addLog('recv', '操作成功');
+                    if (result.newState) setServerState(result.newState);
+                } catch (error) {
+                    addLog('error', `操作失敗: ${error.message}`);
+                }
+            }, [status.connected, settings, addLog]);
+
+            const currentUser = useMemo(() => (serverState.users || []).find(u => u.id === impersonatedUser), [serverState.users, impersonatedUser]);
+
+            useEffect(() => {
+                if (serverState.users && serverState.users.length > 0 && !impersonatedUser) {
+                    setImpersonatedUser(serverState.users[0].id);
+                }
+            }, [serverState.users, impersonatedUser]);
 
             return (
                 <div className="app-container">
-                    {error && <div style={{color: 'var(--accent-red)', padding: '10px', textAlign: 'center'}}>{error}</div>}
-                    {!appState.currentUser || !appState.state ? (
-                        <LoginScreen onLogin={handleLogin} settings={appState.settings} />
-                    ) : (
-                        <MainDashboard user={appState.currentUser} initialState={appState.state} settings={appState.settings} onLogout={handleLogout} />
-                    )}
-                </div>
-            );
-        }
-
-        function MainDashboard({ user, onLogout, initialState, settings }) {
-            const [state, setState] = useState(initialState);
-            const lastSyncTime = useRef(Date.now());
-
-            const onSendOperation = useCallback(async (type, data) => {
-                const op = API.createOperation(type, data, user.id);
-                try {
-                    const result = await API.sendOperations(settings, [op]);
-                    if (result.newState) setState(result.newState);
-                } catch (e) { console.error(e); }
-            }, [user.id, settings]);
-
-            useEffect(() => {
-                const poll = () => {
-                    API.fetchState(settings, lastSyncTime.current).then(data => {
-                        if (data && data.state) {
-                            setState(data.state);
-                            lastSyncTime.current = data.lastUpdate;
-                        }
-                    }).catch(console.error);
-                };
-                const interval = setInterval(poll, 3000);
-                return () => clearInterval(interval);
-            }, [settings]);
-
-            const currentUserInState = state.users.find(u => u.id === user.id);
-
-            return (
-                <div className="dashboard">
-                    <header className="dashboard-header">
-                        <h1>TRPGトークン</h1>
-                        <div className="user-badge">{user.name} | {currentUserInState?.balance.toLocaleString()} coin</div>
-                        <button className="btn" onClick={onLogout}>ログアウト</button>
+                    <header className="app-header">
+                        <h1>高機能テストクライアント <span className="highlight">v2.0</span></h1>
+                        <a href="index.html" style={{color: 'var(--accent-color)'}}>メインページに戻る</a>
                     </header>
-                    <aside className="dashboard-left">
-                        <WalletPanel users={state.users} />
-                        <StatsPanel state={state} />
+                    <aside className="app-sidebar">
+                        <ConnectionPanel settings={settings} onSettingChange={handleSettingChange} onConnect={connect} status={status} />
+                        <OperationBuilder
+                            serverState={serverState}
+                            onSendOperation={sendOperation}
+                            impersonatedUser={impersonatedUser}
+                            setImpersonatedUser={setImpersonatedUser}
+                        />
+                        <ApprovalPanel
+                            approvals={serverState.approvals || []}
+                            users={serverState.users || []}
+                            currentUser={currentUser}
+                            onSendOperation={sendOperation}
+                        />
+                        <MessagingPanel users={serverState.users || []} onSendOperation={sendOperation} />
                     </aside>
-                    <main className="dashboard-main">
-                        <ActionPanel onSendOperation={onSendOperation} state={state} currentUser={user} />
+                    <main className="app-main">
+                        <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />
+                        {activeTab === 'logs' && <LogPanel logs={logs} />}
+                        {activeTab === 'state' && <JsonViewer data={serverState} />}
+                        {activeTab === 'analytics' && <AnalyticsPanel serverState={serverState} />}
+                        {activeTab === 'admin' && <AdminPanel users={serverState.users || []} onSendOperation={sendOperation} />}
                     </main>
-                    <aside className="dashboard-right">
-                        <HistoryPanel txs={state.txs} users={state.users} />
-                    </aside>
+                    <footer className="app-footer">
+                        <span className={`status-indicator ${status.connected ? 'connected' : ''}`}></span>
+                        {status.message}
+                    </footer>
                 </div>
             );
         }
 
-        const WalletPanel = ({ users }) => (
+        const ConnectionPanel = ({ settings, onSettingChange, onConnect, status }) => (
             <div className="panel">
-                <h2>ウォレット一覧</h2>
-                <div>{users.map(u => <div className="wallet-list-item" key={u.id}><span>{u.name}</span><span>{u.balance.toLocaleString()} coin</span></div>)}</div>
+                <h2>接続設定</h2>
+                <div className="form-grid">
+                    <label htmlFor="syncUrl">URL</label>
+                    <input id="syncUrl" type="text" value={settings.url || ''} onChange={e => onSettingChange('url', e.target.value)} />
+                    <label htmlFor="syncRoom">ルーム名</label>
+                    <input id="syncRoom" type="text" value={settings.room || ''} onChange={e => onSettingChange('room', e.target.value)} />
+                    <label htmlFor="syncKey">ルーム鍵</label>
+                    <input id="syncKey" type="text" value={settings.key || ''} onChange={e => onSettingChange('key', e.target.value)} />
+                    <div className="full-width">
+                        <button onClick={onConnect} disabled={!settings.url || !settings.room || !settings.key}>
+                            {status.connected ? '状態を再取得' : '接続'}
+                        </button>
+                    </div>
+                </div>
             </div>
         );
 
-        const HistoryPanel = ({ txs, users }) => {
-            const nameOf = (id) => users.find(u => u.id === id)?.name || 'N/A';
-            return (
-                <div className="panel">
-                    <h2>取引履歴</h2>
-                    <div>{(txs || []).slice(0, 40).map(tx => <div className="history-item" key={tx.id}><strong>{nameOf(tx.from)}</strong> &rarr; <strong>{nameOf(tx.to)}</strong>: {tx.amount} coin <br/><span style={{color: 'var(--fg-light-3)'}}>{tx.memo || tx.title}</span></div>)}</div>
-                </div>
-            );
-        };
+        const OperationBuilder = ({ serverState, onSendOperation, impersonatedUser, setImpersonatedUser }) => {
+            const [selectedOp, setSelectedOp] = useState('');
+            const [formState, setFormState] = useState({});
+            const [isSilent, setIsSilent] = useState(true);
 
-        const ActionPanel = ({ onSendOperation, state, currentUser }) => {
-            const [activeTab, setActiveTab] = useState('transfer');
-            return (
-                <div className="panel">
-                    <div className="action-tabs">
-                        <div className={`action-tab ${activeTab === 'transfer' ? 'active' : ''}`} onClick={() => setActiveTab('transfer')}>送金</div>
-                        <div className={`action-tab ${activeTab === 'market' ? 'active' : ''}`} onClick={() => setActiveTab('market')}>マーケット</div>
-                    </div>
-                    {activeTab === 'transfer' && <TransferPanel onSendOperation={onSendOperation} users={state.users} currentUser={currentUser} />}
-                    {activeTab === 'market' && <div style={{padding: '20px', textAlign: 'center'}}>マーケット機能は現在開発中です。</div>}
-                </div>
-            );
-        };
-
-        const TransferPanel = ({ onSendOperation, users, currentUser }) => {
-            const [toId, setToId] = useState('');
-            const [amount, setAmount] = useState('');
-            const [memo, setMemo] = useState('');
-
-            const handleSubmit = (e) => {
-                e.preventDefault();
-                onSendOperation('transfer', { toId, amount: Number(amount), memo });
-                setAmount(''); setMemo('');
+            const handleOpChange = (e) => {
+                const opName = e.target.value;
+                setSelectedOp(opName);
+                const params = SCHEMAS[opName]?.params || [];
+                const newFormState = {};
+                params.forEach(p => {
+                    newFormState[p.name] = p.defaultValue ?? '';
+                });
+                setFormState(newFormState);
             };
 
+            const handleFormChange = (name, value) => {
+                setFormState(prev => ({...prev, [name]: value}));
+            };
+
+            const handleSubmit = () => {
+                const operation = {
+                    id: 'op_' + Math.random().toString(36).slice(2) + '_' + Date.now(),
+                    type: selectedOp,
+                    data: { ...formState },
+                    timestamp: Date.now(),
+                    userId: impersonatedUser,
+                    clientId: 'client_' + Math.random().toString(36).slice(2),
+                    sessionId: 'session_' + Math.random().toString(36).slice(2),
+                    meta: { silent: isSilent }
+                };
+                onSendOperation(operation);
+            };
+
+            const schema = SCHEMAS[selectedOp];
+
             return (
-                <form onSubmit={handleSubmit}>
-                    <div className="input-group">
-                        <label>送信先</label>
-                        <select value={toId} onChange={e => setToId(e.target.value)} required>
-                            <option value="">選択...</option>
-                            {users.filter(u => u.id !== currentUser.id && u.name !== 'ジャックポット').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                <div className="panel">
+                    <h2>操作ビルダー</h2>
+                    <div className="form-grid">
+                        <label htmlFor="impersonateUser">実行ユーザー</label>
+                        <select id="impersonateUser" value={impersonatedUser} onChange={e => setImpersonatedUser(e.target.value)}>
+                            {(serverState.users || []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+
+                        <label htmlFor="opSelect">操作テンプレート</label>
+                        <select id="opSelect" value={selectedOp} onChange={handleOpChange}>
+                            {Object.entries(SCHEMAS).map(([key, { description }]) => <option key={key} value={key}>{key || '選択...'}</option>)}
                         </select>
                     </div>
-                    <div className="input-group"><label>金額</label><input type="number" value={amount} onChange={e => setAmount(e.target.value)} required min="1" /></div>
-                    <div className="input-group"><label>メモ</label><input type="text" value={memo} onChange={e => setMemo(e.target.value)} /></div>
-                    <button type="submit" className="btn">送金</button>
-                </form>
-            );
-        }
-
-        function StatsPanel({ state }) {
-            const pieChartRef = useRef(null);
-            useEffect(() => {
-                if (!state.users || !d3 || !pieChartRef.current) return;
-                const users = state.users.filter(u => u.name !== 'ジャックポット');
-                const data = users.map(u => ({name: u.name, value: u.balance}));
-
-                const width = 280, height = 280, margin = 20;
-                const radius = Math.min(width, height) / 2 - margin;
-
-                d3.select(pieChartRef.current).select("svg").remove();
-                const svg = d3.select(pieChartRef.current).append("svg").attr("width", width).attr("height", height).append("g").attr("transform", `translate(${width / 2},${height / 2})`);
-                const color = d3.scaleOrdinal().domain(data.map(d => d.name)).range(d3.schemeSpectral[data.length] || d3.schemeCategory10);
-                const pie = d3.pie().value(d => d.value);
-                const data_ready = pie(data);
-
-                svg.selectAll('path').data(data_ready).join('path')
-                    .attr('d', d3.arc().innerRadius(radius * 0.5).outerRadius(radius))
-                    .attr('fill', d => color(d.data.name))
-                    .attr("stroke", "var(--bg-dark-1)").style("stroke-width", "2px");
-            }, [state.users]);
-
-            return (<div className="panel"><h2>資産分布</h2><div ref={pieChartRef} style={{display: 'flex', justifyContent: 'center'}}></div></div>);
-        }
-
-        function LoginScreen({ onLogin, settings }) {
-            const [isLoginView, setIsLoginView] = useState(true);
-            const [name, setName] = useState('');
-            const [pass, setPass] = useState('');
-            const [error, setError] = useState('');
-            const [loading, setLoading] = useState(false);
-            const passRef = useRef(null);
-
-            const handleSubmit = async (e) => {
-                e.preventDefault();
-                setError('');
-                if (!settings.url) { setError("同期URLが設定されていません。"); return; }
-                setLoading(true);
-                try {
-                    const serverData = await API.fetchState(settings);
-                    const serverState = serverData ? serverData.state : { users: [] };
-                    if (isLoginView) {
-                        const user = serverState.users.find(u => u.name === name);
-                        if (!user) throw new Error('ユーザーが見つかりません');
-                        const passHash = await API.sha256(pass);
-                        if (user.passHash !== passHash) { passRef.current.select(); throw new Error('パスワードが違います'); }
-                        onLogin(user, serverState);
-                    } else {
-                        if (serverState.users.some(u => u.name === name)) throw new Error('そのユーザー名は使用済みです');
-                        const passHash = await API.sha256(pass);
-                        const op = API.createOperation('register_user', { name, passHash }, null);
-                        const result = await API.sendOperations(settings, [op]);
-                        const newUser = result.newState.users.find(u => u.name === name);
-                        if (newUser) onLogin(newUser, result.newState);
-                        else throw new Error('登録後のユーザーが見つかりませんでした。');
-                    }
-                } catch (err) { setError(err.message); } finally { setLoading(false); }
-            };
-
-            return (
-                <div className="login-screen">
-                    <div className="login-box">
-                        <h1>{isLoginView ? 'ログイン' : '新規登録'}</h1>
-                        <form onSubmit={handleSubmit}>
-                            <div className="input-group"><label htmlFor="username">ユーザー名</label><input id="username" type="text" value={name} onChange={e => setName(e.target.value)} required /></div>
-                            <div className="input-group"><label htmlFor="password">パスワード</label><input id="password" type="password" ref={passRef} value={pass} onChange={e => setPass(e.target.value)} required /></div>
-                            {error && <p style={{color: 'var(--accent-red)', textAlign: 'center'}}>{error}</p>}
-                            <button type="submit" className="btn" disabled={loading}>{loading ? '処理中...' : (isLoginView ? 'ログイン' : '登録してログイン')}</button>
-                        </form>
-                        <p className="toggle-form">{isLoginView ? 'アカウントがありませんか？' : '既にアカウントがありますか？'}<span onClick={() => setIsLoginView(!isLoginView)}>{isLoginView ? ' 新規登録' : ' ログイン'}</span></p>
+                    {schema && schema.params.length > 0 && (
+                        <div className="form-grid" style={{marginTop: '15px', borderTop: '1px solid var(--border-color)', paddingTop: '15px'}}>
+                            {schema.params.map(param => {
+                                const id = `param-${param.name}`;
+                                let input;
+                                if (param.type === 'user_id' || param.type === 'listing_id' || param.type === 'right_id') {
+                                    const items = serverState[param.type.replace('_id', 's')] || [];
+                                    input = (
+                                        <select id={id} value={formState[param.name] || ''} onChange={e => handleFormChange(param.name, e.target.value)}>
+                                            <option value="">選択...</option>
+                                            {items.map(item => <option key={item.id} value={item.id}>{item.title || item.name}</option>)}
+                                        </select>
+                                    );
+                                } else if (param.type === 'select') {
+                                    input = (
+                                      <select id={id} value={formState[param.name] || ''} onChange={e => handleFormChange(param.name, e.target.value)}>
+                                        {param.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                      </select>
+                                    );
+                                } else {
+                                    input = <input type={param.type} id={id} value={formState[param.name] || ''} onChange={e => handleFormChange(param.name, e.target.value)} />;
+                                }
+                                return <React.Fragment key={param.name}><label htmlFor={id}>{param.label}</label>{input}</React.Fragment>;
+                            })}
+                        </div>
+                    )}
+                    <div className="full-width" style={{marginTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                        <div className="checkbox-wrapper">
+                            <input type="checkbox" id="silent-checkbox" checked={isSilent} onChange={e => setIsSilent(e.target.checked)} />
+                            <label htmlFor="silent-checkbox">index側のログに記録しない</label>
+                        </div>
+                        <button onClick={handleSubmit} disabled={!selectedOp || !impersonatedUser}>操作を送信</button>
                     </div>
                 </div>
             );
-        }
+        };
+
+        const Tabs = ({ activeTab, setActiveTab }) => {
+            const tabs = [{id: 'logs', label: '操作ログ'}, {id: 'state', label: 'サーバー状態'}, {id: 'analytics', label: '分析'}, {id: 'admin', label: '管理'}];
+            return (
+                <div className="tabs">
+                    {tabs.map(tab => <div key={tab.id} className={`tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>{tab.label}</div>)}
+                </div>
+            );
+        };
+
+        const LogPanel = ({ logs }) => (
+            <div className="log-panel">
+                {logs.map((log, i) => (
+                    <div key={i} className="log-entry">
+                        <span className="timestamp">{log.ts.toLocaleTimeString()}</span>
+                        <span className={`type-${log.type}`}>{log.type.toUpperCase()}:</span>
+                        <span> {log.message}</span>
+                    </div>
+                ))}
+            </div>
+        );
+
+        const JsonViewer = ({ data }) => {
+            const createMarkup = (json) => {
+                if (typeof json !== 'string') {
+                    json = JSON.stringify(json, undefined, 2);
+                }
+                json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
+                    let cls = 'number';
+                    if (/^"/.test(match)) {
+                        if (/:$/.test(match)) {
+                            cls = 'key';
+                        } else {
+                            cls = 'string';
+                        }
+                    } else if (/true|false/.test(match)) {
+                        cls = 'boolean';
+                    } else if (/null/.test(match)) {
+                        cls = 'null';
+                    }
+                    return `<span class="${cls}">${match}</span>`;
+                });
+            };
+            return <pre className="json-viewer" dangerouslySetInnerHTML={{ __html: createMarkup(data) }} />;
+        };
+
+        const UsersPanel = ({ users }) => (
+            <div className="panel">
+                <h2>ユーザー一覧</h2>
+                <div className="form-grid" style={{fontWeight: 'bold', borderBottom: '1px solid var(--border-color)', paddingBottom: '5px'}}>
+                    <span>名前</span>
+                    <span>残高</span>
+                </div>
+                {users.map(user => (
+                    <div key={user.id} className="form-grid" style={{borderBottom: '1px solid var(--border-color)', padding: '5px 0'}}>
+                        <span>{user.name}</span>
+                        <span style={{color: 'var(--green)'}}>{user.balance.toLocaleString()} coin</span>
+                    </div>
+                ))}
+            </div>
+        );
+
+        const ApprovalPanel = ({ approvals = [], users = [], currentUser, onSendOperation }) => {
+            const myApprovals = approvals.filter(a => a.approverId === currentUser?.id && a.status === 'pending');
+
+            const handleAction = (approvalId, action) => {
+                if (!currentUser) return;
+                const op = {
+                    id: 'op_' + Math.random().toString(36).slice(2) + '_' + Date.now(),
+                    type: 'approve_transfer',
+                    data: { approvalId, action },
+                    timestamp: Date.now(),
+                    userId: currentUser.id,
+                    clientId: 'client_' + Math.random().toString(36).slice(2),
+                    sessionId: 'session_' + Math.random().toString(36).slice(2),
+                    meta: { silent: false }
+                };
+                onSendOperation(op);
+            };
+
+            const getUserName = (userId) => {
+                const user = users.find(u => u.id === userId);
+                return user ? user.name : '不明なユーザー';
+            };
+
+            if (!currentUser || myApprovals.length === 0) {
+                return null;
+            }
+
+            return (
+                <div className="panel">
+                    <h2>送金承認待ち</h2>
+                    {myApprovals.map(approval => (
+                        <div key={approval.id} style={{ borderBottom: '1px solid var(--border-color)', padding: '10px 0' }}>
+                            <div className="form-grid">
+                                <label>リクエスト元</label>
+                                <span>{getUserName(approval.requesterId)}</span>
+                                <label>金額</label>
+                                <span>{approval.amount.toLocaleString()} 円</span>
+                                {approval.memo && (
+                                    <React.Fragment>
+                                        <label>メモ</label>
+                                        <span>{approval.memo}</span>
+                                    </React.Fragment>
+                                )}
+                            </div>
+                            <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                                <button onClick={() => handleAction(approval.id, 'reject')} style={{ backgroundColor: 'var(--orange)' }}>拒否</button>
+                                <button onClick={() => handleAction(approval.id, 'approve')} style={{ backgroundColor: 'var(--green)' }}>承認</button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        const MessagingPanel = ({ users = [], onSendOperation }) => {
+            const [recipientId, setRecipientId] = useState('');
+            const [messageType, setMessageType] = useState('normal');
+            const [content, setContent] = useState('');
+
+            useEffect(() => {
+                if (!recipientId && users.length > 0) {
+                    setRecipientId(users[0].id);
+                }
+            }, [users, recipientId]);
+
+            const handleSend = () => {
+                if (!recipientId || !content) {
+                    alert('受信者とメッセージ内容を入力してください。');
+                    return;
+                }
+                const op = {
+                    type: 'send_message',
+                    data: {
+                        recipientId,
+                        content,
+                        type: messageType,
+                        isHtml: true,
+                    }
+                };
+                // We can reuse the main `sendOperation` function.
+                // It needs to be passed down to this component.
+                onSendOperation(op);
+                setContent('');
+            };
+
+            return (
+                <div className="panel">
+                    <h2>メッセージ送信</h2>
+                    <div className="form-grid">
+                        <label htmlFor="recipient">受信者</label>
+                        <select id="recipient" value={recipientId} onChange={e => setRecipientId(e.target.value)}>
+                            {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+
+                        <label htmlFor="messageType">タイプ</label>
+                        <select id="messageType" value={messageType} onChange={e => setMessageType(e.target.value)}>
+                            <option value="normal">通常 (トースト)</option>
+                            <option value="emphasis">強調 (モーダル)</option>
+                        </select>
+
+                        <label htmlFor="messageContent" className="full-width" style={{gridColumn: '1 / -1'}}>メッセージ (HTML可)</label>
+                        <textarea
+                            id="messageContent"
+                            value={content}
+                            onChange={e => setContent(e.target.value)}
+                            rows="4"
+                            className="full-width"
+                            style={{gridColumn: '1 / -1'}}
+                        ></textarea>
+
+                        <div className="full-width" style={{gridColumn: '1 / -1'}}>
+                            <button onClick={handleSend} disabled={!recipientId || !content}>送信</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AdminPanel = ({ users = [], onSendOperation }) => {
+            const [selectedUser, setSelectedUser] = useState('');
+
+            useEffect(() => {
+                if (!selectedUser && users.length > 0) {
+                    setSelectedUser(users[0].id);
+                }
+            }, [users, selectedUser]);
+
+            const handleDeleteUser = () => {
+                if (!selectedUser || !confirm(`${users.find(u=>u.id===selectedUser)?.name} を本当に削除しますか？この操作は元に戻せません。`)) return;
+                onSendOperation({ type: 'delete_user', data: { userId: selectedUser } });
+            };
+
+            const handleClearLogs = () => {
+                if (!confirm('本当にすべての取引ログを削除しますか？この操作は元に戻せません。')) return;
+                onSendOperation({ type: 'clear_logs', data: {} });
+            };
+
+            return (
+                <div className="panel">
+                    <h2>管理アクション</h2>
+                    <div className="form-grid" style={{gap: '20px'}}>
+                        <div>
+                            <label>ユーザーの削除</label>
+                            <div style={{display: 'flex', gap: '10px', marginTop: '5px'}}>
+                                <select value={selectedUser} onChange={e => setSelectedUser(e.target.value)} style={{flex: 1}}>
+                                    {users.filter(u => u.name !== 'ジャックポット').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                </select>
+                                <button onClick={handleDeleteUser} style={{backgroundColor: 'var(--red)'}} disabled={!selectedUser}>削除実行</button>
+                            </div>
+                        </div>
+                        <div>
+                           <label>ログの削除</label>
+                            <div style={{marginTop: '5px'}}>
+                                <button onClick={handleClearLogs} style={{backgroundColor: 'var(--red)'}}>全取引ログを削除</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AnalyticsPanel = ({ serverState }) => {
+            const barChartRef = React.useRef(null);
+            const forceGraphRef = React.useRef(null);
+
+            const exportChart = (ref, format) => {
+                const svgEl = ref.current.querySelector('svg');
+                if (!svgEl) return;
+
+                // For a clean export, reset transform before rendering
+                d3.select(svgEl).select('g').attr('transform', '');
+
+                const svgContent = svgEl.innerHTML;
+                const { width, height } = svgEl.getBBox();
+
+                if (format === 'svg') {
+                    const serializer = new XMLSerializer();
+                    // Create a temporary SVG with determined dimensions for clean export
+                    const tempSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                    tempSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+                    tempSvg.setAttribute("width", width);
+                    tempSvg.setAttribute("height", height);
+                    tempSvg.innerHTML = svgContent;
+
+                    const source = '<?xml version="1.0" standalone="no"?>\r\n' + serializer.serializeToString(tempSvg);
+                    const image = new Image();
+                    image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(source);
+                    const a = document.createElement("a");
+                    a.href = image.src;
+                    a.download = "chart.svg";
+                    a.click();
+                } else if (format === 'png') {
+                    html2canvas(svgEl, {
+                        width: width,
+                        height: height,
+                        backgroundColor: null // transparent background
+                    }).then(canvas => {
+                        const a = document.createElement("a");
+                        a.href = canvas.toDataURL("image/png");
+                        a.download = "chart.png";
+                        a.click();
+                    });
+                }
+            };
+
+            useEffect(() => {
+                if (!serverState || !serverState.users || !d3) return;
+
+                const margin = {top: 20, right: 30, bottom: 90, left: 60};
+                const width = 500 - margin.left - margin.right;
+                const height = 400 - margin.top - margin.bottom;
+
+                const zoom = d3.zoom().on("zoom", (event) => {
+                    d3.select(event.target).select('g').attr("transform", event.transform);
+                });
+
+                // --- Bar Chart ---
+                const users = serverState.users.filter(u => u.name !== 'ジャックポット').sort((a,b) => b.balance - a.balance);
+                const barChartNode = barChartRef.current;
+                d3.select(barChartNode).select("svg").remove();
+
+                const svgBarContainer = d3.select(barChartNode).append("svg")
+                    .attr("width", width + margin.left + margin.right)
+                    .attr("height", height + margin.top + margin.bottom)
+                    .call(zoom);
+
+                const svgBar = svgBarContainer.append("g")
+                    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+                const x = d3.scaleBand().range([0, width]).padding(0.2).domain(users.map(d => d.name));
+                svgBar.append("g").attr("class", "x-axis").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x))
+                    .selectAll("text").attr("transform", "translate(-10,0)rotate(-45)").style("text-anchor", "end").style("fill", "var(--fg-muted)");
+
+                const y = d3.scaleLinear().range([height, 0]).domain([0, d3.max(users, d => d.balance)]);
+                svgBar.append("g").attr("class", "y-axis").call(d3.axisLeft(y)).selectAll("text").style("fill", "var(--fg-muted)");
+
+                svgBar.append("g").selectAll("rect").data(users).enter().append("rect")
+                    .attr("x", d => x(d.name))
+                    .attr("y", d => y(d.balance))
+                    .attr("width", x.bandwidth())
+                    .attr("height", d => height - y(d.balance))
+                    .attr("fill", "var(--accent-color)");
+
+                // --- Force-directed graph ---
+                if (!serverState.txs) return;
+                const forceGraphNode = forceGraphRef.current;
+                d3.select(forceGraphNode).select("svg").remove();
+
+                const nodes = serverState.users.map(u => ({...u}));
+                const links = serverState.txs
+                    .filter(tx => tx.type === 'transfer' && tx.from && tx.to)
+                    .map(tx => ({source: tx.from, target: tx.to, amount: tx.amount}));
+
+                if (nodes.length === 0) return;
+
+                const svgForceContainer = d3.select(forceGraphNode).append("svg")
+                    .attr("width", width + margin.left + margin.right)
+                    .attr("height", height + margin.top + margin.bottom)
+                    .call(zoom);
+
+                const svgForce = svgForceContainer.append("g");
+
+                const simulation = d3.forceSimulation(nodes)
+                    .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+                    .force("charge", d3.forceManyBody().strength(-150))
+                    .force("center", d3.forceCenter((width + margin.left + margin.right) / 2, (height + margin.top + margin.bottom) / 2));
+
+                const link = svgForce.append("g").selectAll("line").data(links).enter().append("line")
+                    .style("stroke", "var(--accent-secondary)").style("stroke-width", d => Math.max(1, Math.sqrt(d.amount/100)));
+
+                const node = svgForce.append("g").selectAll("circle").data(nodes).enter().append("circle")
+                    .attr("r", 8).style("fill", "var(--accent-color)");
+
+                const labels = svgForce.append("g").selectAll("text").data(nodes).enter().append("text")
+                    .text(d => d.name).attr("x", 12).attr("y", 4).style("fill", "var(--fg-color)").style("font-size", "12px");
+
+                simulation.on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    labels.attr("x", d => d.x + 12).attr("y", d => d.y + 4);
+                });
+
+            }, [serverState]);
+
+            return (
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px'}}>
+                    <div className="panel">
+                        <h2>ユーザー残高</h2>
+                        <div ref={barChartRef}></div>
+                        <button onClick={() => exportChart(barChartRef, 'png')}>PNGとしてエクスポート</button>
+                        <button onClick={() => exportChart(barChartRef, 'svg')} style={{marginLeft: '10px'}}>SVGとしてエクスポート</button>
+                    </div>
+                    <div className="panel">
+                        <h2>取引関係図</h2>
+                        <div ref={forceGraphRef}></div>
+                         <button onClick={() => exportChart(forceGraphRef, 'png')}>PNGとしてエクスポート</button>
+                        <button onClick={() => exportChart(forceGraphRef, 'svg')} style={{marginLeft: '10px'}}>SVGとしてエクスポート</button>
+                    </div>
+                </div>
+            );
+        };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
