@@ -162,22 +162,22 @@
     .container{max-width:1200px; margin:20px auto; padding:0 16px}
 
     .card{
-      background:var(--panel); 
+      background:var(--panel);
       border:1px solid var(--line);
-      border-radius:16px; 
-      padding:16px; 
+      border-radius:16px;
+      padding:16px;
       box-shadow:0 10px 30px #0004;
     }
     .card .hd{
-      display:flex; 
-      align-items:center; 
-      justify-content:space-between; 
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
       margin-bottom:12px;
       padding-bottom: 12px;
       border-bottom: 1px solid var(--line);
     }
     .card .hd h2, .card .hd h3{
-      font-size:15px; 
+      font-size:15px;
       font-weight:600;
       margin: 0;
     }
@@ -198,17 +198,17 @@
         .tabbar .tab.active{background:linear-gradient(180deg,var(--accent) ,var(--accent2)); color:#000000 /* active = black text */}
 
     .btn{
-      display:inline-block; 
-      padding: 8px 12px; 
-      border-radius: 8px; 
-      font-weight: 600; 
+      display:inline-block;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-weight: 600;
       font-size: 13px;
       line-height: 1.4;
-      border:0; 
+      border:0;
       cursor:pointer;
-      background:linear-gradient(180deg,var(--accent),var(--accent2)); 
+      background:linear-gradient(180deg,var(--accent),var(--accent2));
       color:#00121a;
-      box-shadow:0 4px 12px #0bf5ff33; 
+      box-shadow:0 4px 12px #0bf5ff33;
       transition: all .2s ease;
     }
     .btn:hover {
@@ -228,7 +228,7 @@
     input::placeholder,textarea::placeholder{color:#7f93ab}
 
     .grid{
-      display:grid; 
+      display:grid;
       gap:16px;
       max-width: 1440px;
       margin: 0 auto;
@@ -241,10 +241,10 @@
         grid-template-columns: minmax(280px, 1fr) minmax(320px, 2fr);
       }
     }
-    @media (max-width:900px){ 
+    @media (max-width:900px){
       .grid.cols-3{
         grid-template-columns:1fr
-      } 
+      }
     }
 
     .pill{
@@ -260,19 +260,19 @@
     td,th{padding:8px 10px; text-align:left}
     thead th{color:var(--muted); font-weight:800}
     tbody tr{
-      background:#0b1632; 
+      background:#0b1632;
       border:1px solid var(--line);
       transition: all 0.2s ease;
     }
     tbody tr td:first-child{
-      border-top-left-radius:12px; 
+      border-top-left-radius:12px;
       border-bottom-left-radius:12px
     }
     tbody tr td:last-child{
-      border-top-right-radius:12px; 
+      border-top-right-radius:12px;
       border-bottom-right-radius:12px
     }
-    
+
     /* Responsive tables */
     .table {
       overflow-x: auto;
@@ -292,7 +292,7 @@
       background-color: rgba(96,239,255,.2);
       border-radius: 3px;
     }
-    
+
     @media (max-width: 768px) {
       table {
         font-size: 12px;
@@ -373,7 +373,7 @@
 
   /* Ensure main content doesn't sit under the fixed top panel */
   main, .container { padding-top: 56px !important; }
-  
+
     /* Card-level vertical scrolling for long lists (market, rights, history, etc.)
        Make tables inside cards scroll vertically when content grows, but visually hide scrollbars. */
     .card .bd .table {
@@ -491,6 +491,10 @@
 </header>
 <main>
     <div class="grid">
+        <section class="card" id="votingPanel" style="display:none;">
+            <div class="hd" style="border-color: var(--accent-yellow);"><h3 style="color: var(--accent-yellow);">⚠️ 送金承認</h3></div>
+            <div class="bd" id="votingPanelBody"></div>
+        </section>
         <section class="card">
             <div class="hd"><h3>アカウント & 同期</h3></div>
             <div class="bd">
@@ -718,7 +722,7 @@
             regName: document.getElementById('regName'),
             regPass: document.getElementById('regPass'),
             registerBtn: document.getElementById('registerBtn'),
-            tabs: Array.from(document.querySelectorAll('.tabbar .tab')),
+            tabs: Array.from(document.querySelectorAll('.card .hd .tabbar .tab')),
             tabTransfer: document.getElementById('tab-transfer'),
             tabMarket: document.getElementById('tab-market'),
             tabMyRights: document.getElementById('tab-myrights'),
@@ -893,7 +897,7 @@
                 clientId: getClientId(), // クライアント識別用
                 sessionId: getSessionId() // タブ（セッション）識別用
             };
-            
+
             console.log('Creating operation:', operation);
             return operation;
         }
@@ -923,7 +927,7 @@
         function queueOperation(operation) {
             operationQueue.push(operation);
             pendingOperations.push(operation);
-            
+
             // Broadcast to other tabs so they can optimistic-update too
             try {
                 if (bc) bc.postMessage({ type: 'operation_queued', operation: operation, sessionId: getSessionId() });
@@ -1130,24 +1134,24 @@
                 toast('ログインが必要');
                 return;
             }
-            
+
             amount = Math.floor(Number(amount));
             if (!(amount > 0)) {
                 toast('金額は1以上の整数');
                 return;
             }
-            
+
             const to = findUserById(toId);
             if (!to) {
                 toast('送信先が不正');
                 return;
             }
-            
+
             if (from.id === toId) {
                 toast('自分自身へは送れません');
                 return;
             }
-            
+
             if (from.balance < amount) {
                 toast('残高不足');
                 return;
@@ -1159,9 +1163,9 @@
                 amount: amount,
                 memo: memo || ''
             });
-            
+
             queueOperation(operation);
-            
+
             // ローカルで即座に実行（楽観的更新）
             from.balance -= amount;
             to.balance += amount;
@@ -1173,7 +1177,7 @@
                 memo: (memo || '').trim(),
                 pending: true // ペンディング状態をマーク
             });
-            
+
             saveLocal(true); // 同期はschedulePushで行う
         }
 
@@ -1195,9 +1199,9 @@
             const operation = createOperation('buy_listing', {
                 listingId: listingId
             });
-            
+
             queueOperation(operation);
-            
+
             // ローカルで楽観的更新
             const remaining = (listing.qty || 1) - (listing.sold || 0);
             if (remaining > 0 && buyer.balance >= listing.price) {
@@ -1205,16 +1209,16 @@
                 const j = jackpotUser();
                 const fee = Math.floor(listing.price * 0.10);
                 const sellerReceive = listing.price - fee;
-                
+
                 buyer.balance -= listing.price;
                 seller.balance += sellerReceive;
                 j.balance += fee;
-                
+
                 listing.sold = (listing.sold || 0) + 1;
                 if (listing.sold >= listing.qty) {
                     listing.active = false;
                 }
-                
+
                 // 権利とトランザクションを追加
                 const right = {
                     id: id(),
@@ -1228,7 +1232,7 @@
                     pending: true
                 };
                 state.rights.unshift(right);
-                
+
                 addTx({
                     type: 'purchase',
                     from: buyer.id,
@@ -1240,7 +1244,7 @@
                     pending: true
                 });
             }
-            
+
             saveLocal(true);
         }
 
@@ -1251,27 +1255,27 @@
                 toast('ユーザー名とパスワードを入力');
                 return;
             }
-            
+
             if (name === 'ジャックポット') {
                 toast('この名前は予約されています');
                 return;
             }
-            
+
             if (state.users.some(u => u.name === name)) {
                 toast('そのユーザー名は使用済み');
                 return;
             }
-            
+
             const passHash = await sha256(pass);
-            
+
             // 操作をキューに追加
             const operation = createOperation('register_user', {
                 name: name,
                 passHash: passHash
             }, null); // userIdはnull（新規登録なので）
-            
+
             queueOperation(operation);
-            
+
             // ローカルで楽観的更新
             const u = {
                 id: id(),
@@ -1282,11 +1286,11 @@
                 lastMorningDate: '',
                 pending: true
             };
-            
+
             state.users.push(u);
             state.currentUserId = u.id;
             state.lastRealUserId = u.id;
-            
+
             addTx({
                 type: 'mint',
                 to: u.id,
@@ -1294,7 +1298,7 @@
                 memo: '初期発行',
                 pending: true
             });
-            
+
             saveLocal(true);
             toast('登録処理中...');
         }
@@ -1312,9 +1316,9 @@
             const operation = createOperation('morning_claim', {
                 date: todayKey()
             });
-            
+
             queueOperation(operation);
-            
+
             // ローカルで楽観的更新
             const today = todayKey();
             if (me.lastMorningDate) {
@@ -1323,11 +1327,11 @@
             } else {
                 me.streakCount = 1;
             }
-            
+
             me.lastMorningDate = today;
             const bonus = 1000 + 100 * (me.streakCount || 0);
             me.balance += bonus;
-            
+
             addTx({
                 type: 'mint',
                 to: me.id,
@@ -1335,7 +1339,7 @@
                 memo: `朝活（連続${me.streakCount}日）`,
                 pending: true
             });
-            
+
             saveLocal(true);
         }
 
@@ -1346,21 +1350,21 @@
                 toast('参加できません');
                 return;
             }
-            
+
             const roll = Math.random(); // クライアント側で乱数生成
-            
+
             // 操作をキューに追加
             const operation = createOperation('roulette', {
                 roll: roll
             });
-            
+
             queueOperation(operation);
-            
+
             // ローカルで楽観的更新（簡易版）
             me.balance -= 100;
             const j = jackpotUser();
             j.balance += 100;
-            
+
             addTx({
                 type: 'jpot-fee',
                 from: me.id,
@@ -1369,10 +1373,10 @@
                 memo: 'ルーレット参加費',
                 pending: true
             });
-            
+
             // 結果は一旦保留（サーバーレスポンス待ち）
             document.getElementById('rouletteResult').textContent = '結果: 処理中...';
-            
+
             saveLocal(true);
         }
 
@@ -1646,11 +1650,9 @@
                 return;
             }
 
-            // legacy OperationBasedSync removed — use queue-based createOperation + queueOperation
-            const operation = createOperation('transfer', { toId: to.id, amount: amount, memo: (memo || '').trim() });
+            const operation = createOperation('request_transfer', { toId: to.id, amount: amount, memo: (memo || '').trim() });
             queueOperation(operation);
-            // optimistic update already applied in the other transfer implementation
-            return;
+            toast('送金リクエストを送信しました。他ユーザーの承認待ちです。');
         }
 
     async function createListing(title, price, desc) {
@@ -2307,10 +2309,64 @@
             show(active ? active.dataset.tab : 'transfer');
         }
 
+        function renderVotingPanel() {
+            const panel = document.getElementById('votingPanel');
+            const body = document.getElementById('votingPanelBody');
+            const me = currentUser();
+
+            if (!state.approval || !state.approval.active || !me) {
+                panel.style.display = 'none';
+                return;
+            }
+
+            panel.style.display = 'block';
+            const { operation, votes, requesterId } = state.approval;
+            const { fromId, toId, amount, memo } = operation.data;
+
+            const fromUser = findUserById(fromId);
+            const toUser = findUserById(toId);
+
+            const yesVotes = Object.values(votes).filter(v => v === 'yes').length;
+            const noVotes = Object.values(votes).filter(v => v === 'no').length;
+
+            const hasVoted = votes[me.id];
+            const isRequester = me.id === requesterId;
+
+            body.innerHTML = `
+                <div class="panel">
+                    <p>
+                        <strong>${nameOf(fromId)}</strong> が <strong>${nameOf(toId)}</strong> へ
+                        <strong>${amount.toLocaleString()} coin</strong> の送金をリクエストしました。
+                    </p>
+                    <p style="font-size:12px; color: var(--muted);">メモ: ${memo || 'なし'}</p>
+                    <div class="tabbar">
+                        <button class="btn approve-vote" ${hasVoted || isRequester ? 'disabled' : ''}>承認</button>
+                        <button class="btn secondary reject-vote" ${hasVoted || isRequester ? 'disabled' : ''}>拒否</button>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <span class="chip">承認: ${yesVotes}</span>
+                        <span class="chip">拒否: ${noVotes}</span>
+                        ${hasVoted ? '<span class="chip" style="background: var(--accent-green); color: black;">投票済</span>' : ''}
+                        ${isRequester ? '<span class="chip">あなたはリクエスト者です</span>' : ''}
+                    </div>
+                </div>
+            `;
+
+            body.querySelector('.approve-vote').onclick = () => {
+                const op = createOperation('vote_on_transfer', { vote: 'yes' });
+                queueOperation(op);
+            };
+            body.querySelector('.reject-vote').onclick = () => {
+                const op = createOperation('vote_on_transfer', { vote: 'no' });
+                queueOperation(op);
+            };
+        }
+
         function renderAll() {
             renderSummary();
             renderWallets();
             renderHeaderUser();
+            renderVotingPanel();
             renderSelects();
             renderHistory();
             renderListings();
