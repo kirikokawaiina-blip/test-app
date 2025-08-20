@@ -7,6 +7,8 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         :root {
             --bg-color: #1a1b26;
@@ -353,7 +355,7 @@
             const [status, setStatus] = useState({ connected: false, message: '未接続' });
             const [serverState, setServerState] = useState({});
             const [logs, setLogs] = useState([]);
-            const [activeTab, setActiveTab] = useState('builder');
+            const [activeTab, setActiveTab] = useState('logs');
 
             const addLog = useCallback((type, message) => {
                 setLogs(prev => [{ type, message, ts: new Date() }, ...prev.slice(0, 99)]);
@@ -430,12 +432,13 @@
                     <aside className="app-sidebar">
                         <ConnectionPanel settings={settings} onSettingChange={handleSettingChange} onConnect={connect} status={status} />
                         <OperationBuilder serverState={serverState} onSendOperation={sendOperation} />
+                        <MessagingPanel users={serverState.users} onSendOperation={sendOperation} />
                     </aside>
                     <main className="app-main">
                         <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />
-                        {activeTab === 'builder' && <LogPanel logs={logs} />}
+                        {activeTab === 'logs' && <LogPanel logs={logs} />}
                         {activeTab === 'state' && <JsonViewer data={serverState} />}
-                        {activeTab === 'users' && <UsersPanel users={serverState.users || []} />}
+                        {activeTab === 'analytics' && <AnalyticsPanel serverState={serverState} />}
                     </main>
                     <footer className="app-footer">
                         <span className={`status-indicator ${status.connected ? 'connected' : ''}`}></span>
@@ -559,7 +562,7 @@
         };
 
         const Tabs = ({ activeTab, setActiveTab }) => {
-            const tabs = [{id: 'builder', label: '操作ログ'}, {id: 'state', label: 'サーバー状態'}, {id: 'users', label: '詳細ビュー'}];
+            const tabs = [{id: 'logs', label: '操作ログ'}, {id: 'state', label: 'サーバー状態'}, {id: 'analytics', label: '分析'}];
             return (
                 <div className="tabs">
                     {tabs.map(tab => <div key={tab.id} className={`tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>{tab.label}</div>)}
@@ -619,6 +622,189 @@
                 ))}
             </div>
         );
+
+        const MessagingPanel = ({ users = [], onSendOperation }) => {
+            const [recipientId, setRecipientId] = useState('');
+            const [messageType, setMessageType] = useState('normal');
+            const [content, setContent] = useState('');
+
+            useEffect(() => {
+                if (!recipientId && users.length > 0) {
+                    setRecipientId(users[0].id);
+                }
+            }, [users, recipientId]);
+
+            const handleSend = () => {
+                if (!recipientId || !content) {
+                    alert('受信者とメッセージ内容を入力してください。');
+                    return;
+                }
+                const op = {
+                    type: 'send_message',
+                    data: {
+                        recipientId,
+                        content,
+                        type: messageType,
+                        isHtml: true,
+                    }
+                };
+                // We can reuse the main `sendOperation` function.
+                // It needs to be passed down to this component.
+                onSendOperation(op);
+                setContent('');
+            };
+
+            return (
+                <div className="panel">
+                    <h2>メッセージ送信</h2>
+                    <div className="form-grid">
+                        <label htmlFor="recipient">受信者</label>
+                        <select id="recipient" value={recipientId} onChange={e => setRecipientId(e.target.value)}>
+                            {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+
+                        <label htmlFor="messageType">タイプ</label>
+                        <select id="messageType" value={messageType} onChange={e => setMessageType(e.target.value)}>
+                            <option value="normal">通常 (トースト)</option>
+                            <option value="emphasis">強調 (モーダル)</option>
+                        </select>
+
+                        <label htmlFor="messageContent" className="full-width" style={{gridColumn: '1 / -1'}}>メッセージ (HTML可)</label>
+                        <textarea
+                            id="messageContent"
+                            value={content}
+                            onChange={e => setContent(e.target.value)}
+                            rows="4"
+                            className="full-width"
+                            style={{gridColumn: '1 / -1'}}
+                        ></textarea>
+
+                        <div className="full-width" style={{gridColumn: '1 / -1'}}>
+                            <button onClick={handleSend} disabled={!recipientId || !content}>送信</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AnalyticsPanel = ({ serverState }) => {
+            const barChartRef = React.useRef(null);
+            const forceGraphRef = React.useRef(null);
+
+            const exportChart = (ref, format) => {
+                const svgEl = ref.current.querySelector('svg');
+                if (!svgEl) return;
+
+                if (format === 'svg') {
+                    const serializer = new XMLSerializer();
+                    const source = '<?xml version="1.0" standalone="no"?>\r\n' + serializer.serializeToString(svgEl);
+                    const image = new Image();
+                    image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(source);
+                    const a = document.createElement("a");
+                    a.href = image.src;
+                    a.download = "chart.svg";
+                    a.click();
+                } else if (format === 'png') {
+                    html2canvas(svgEl.parentNode).then(canvas => {
+                        const a = document.createElement("a");
+                        a.href = canvas.toDataURL("image/png");
+                        a.download = "chart.png";
+                        a.click();
+                    });
+                }
+            };
+
+            useEffect(() => {
+                if (!serverState || !serverState.users || !d3) return;
+
+                // --- Bar Chart ---
+                const users = serverState.users.filter(u => u.name !== 'ジャックポット').sort((a,b) => b.balance - a.balance);
+                const barChartNode = barChartRef.current;
+                d3.select(barChartNode).select("svg").remove();
+
+                const margin = {top: 20, right: 30, bottom: 90, left: 60},
+                      width = 500 - margin.left - margin.right,
+                      height = 400 - margin.top - margin.bottom;
+
+                const svgBar = d3.select(barChartNode).append("svg")
+                    .attr("width", width + margin.left + margin.right)
+                    .attr("height", height + margin.top + margin.bottom)
+                    .append("g")
+                    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+                const x = d3.scaleBand().range([0, width]).padding(0.2).domain(users.map(d => d.name));
+                svgBar.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x))
+                    .selectAll("text").attr("transform", "translate(-10,0)rotate(-45)").style("text-anchor", "end").style("fill", "var(--fg-muted)");
+
+                const y = d3.scaleLinear().range([height, 0]).domain([0, d3.max(users, d => d.balance)]);
+                svgBar.append("g").call(d3.axisLeft(y)).selectAll("text").style("fill", "var(--fg-muted)");
+
+                svgBar.selectAll("mybar").data(users).enter().append("rect")
+                    .attr("x", d => x(d.name))
+                    .attr("y", d => y(d.balance))
+                    .attr("width", x.bandwidth())
+                    .attr("height", d => height - y(d.balance))
+                    .attr("fill", "var(--accent-color)");
+
+                // --- Force-directed graph ---
+                if (!serverState.txs) return;
+                const forceGraphNode = forceGraphRef.current;
+                d3.select(forceGraphNode).select("svg").remove();
+
+                const nodes = serverState.users.map(u => ({...u}));
+                const links = serverState.txs
+                    .filter(tx => tx.type === 'transfer' && tx.from && tx.to)
+                    .map(tx => ({source: tx.from, target: tx.to, amount: tx.amount}));
+
+                if (nodes.length === 0) return;
+
+                const simulation = d3.forceSimulation(nodes)
+                    .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+                    .force("charge", d3.forceManyBody().strength(-150))
+                    .force("center", d3.forceCenter(width / 2, height / 2));
+
+                const svgForce = d3.select(forceGraphNode).append("svg")
+                    .attr("width", width + margin.left + margin.right)
+                    .attr("height", height + margin.top + margin.bottom)
+                    .append("g")
+                    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+                const link = svgForce.append("g").selectAll("line").data(links).enter().append("line")
+                    .style("stroke", "var(--accent-secondary)").style("stroke-width", d => Math.max(1, Math.sqrt(d.amount/100)));
+
+                const node = svgForce.append("g").selectAll("circle").data(nodes).enter().append("circle")
+                    .attr("r", 8).style("fill", "var(--accent-color)");
+
+                const labels = svgForce.append("g").selectAll("text").data(nodes).enter().append("text")
+                    .text(d => d.name).attr("x", 12).attr("y", 4).style("fill", "var(--fg-color)").style("font-size", "12px");
+
+                simulation.on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    labels.attr("x", d => d.x + 12).attr("y", d => d.y + 4);
+                });
+
+
+            }, [serverState]);
+
+            return (
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px'}}>
+                    <div className="panel">
+                        <h2>ユーザー残高</h2>
+                        <div ref={barChartRef}></div>
+                        <button onClick={() => exportChart(barChartRef, 'png')}>PNGとしてエクスポート</button>
+                        <button onClick={() => exportChart(barChartRef, 'svg')} style={{marginLeft: '10px'}}>SVGとしてエクスポート</button>
+                    </div>
+                    <div className="panel">
+                        <h2>取引関係図</h2>
+                        <div ref={forceGraphRef}></div>
+                         <button onClick={() => exportChart(forceGraphRef, 'png')}>PNGとしてエクスポート</button>
+                        <button onClick={() => exportChart(forceGraphRef, 'svg')} style={{marginLeft: '10px'}}>SVGとしてエクスポート</button>
+                    </div>
+                </div>
+            );
+        };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
