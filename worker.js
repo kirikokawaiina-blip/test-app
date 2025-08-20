@@ -80,7 +80,7 @@ export default {
 
           // 現在の状態を取得
           const current = await env.STATE_KV.get(kvKey, "json") || {
-            state: { users: [], txs: [], listings: [], rights: [], vTick: 0 },
+            state: { users: [], txs: [], listings: [], rights: [], notifications: [], vTick: 0 },
             lastUpdate: 0,
             processedOps: [],
             conflicts: []
@@ -104,7 +104,8 @@ export default {
               newRights: mergeResult.newRights || [],
               updatedRights: mergeResult.updatedRights || [],
               updatedListings: mergeResult.updatedListings || [],
-              deletedListings: mergeResult.deletedListings || []
+              deletedListings: mergeResult.deletedListings || [],
+              notifications: mergeResult.state.notifications || [],
             }
           };
 
@@ -129,7 +130,7 @@ export default {
             newState: toSave.state,
             processedOps: (toSave.processedOps || []).map(p => p.id || p),
             conflicts: mergeResult.newConflicts || [],
-            notify: toSave.notify || { newUsers: [], newTxs: [] },
+            notify: toSave.notify,
             lastUpdate: toSave.lastUpdate
           });
 
@@ -215,6 +216,12 @@ async function mergeOperations(current, newOperations) {
   const cutoff = Date.now() - (1000 * 60 * 60);
   result.processedOps = result.processedOps.filter(op => op.timestamp > cutoff);
   result.conflicts = result.conflicts.filter(c => c.timestamp > cutoff);
+  // Clear old notifications after 1 minute
+  const notifyCutoff = Date.now() - (1000 * 60);
+  if(result.state.notifications) {
+      result.state.notifications = result.state.notifications.filter(n => n.timestamp > notifyCutoff);
+  }
+
 
   return result;
 }
@@ -254,10 +261,33 @@ async function applyOperation(state, operation) {
       return applySellerRefund(state, data, timestamp, userId, meta);
     case "buyer_finalize":
       return applyBuyerFinalize(state, data, timestamp, userId, meta);
+    case "send_message":
+      return applySendMessage(state, data, timestamp);
     default:
       return { conflict: true, conflictType: "unknown_operation", message: "Unknown operation type: " + type };
   }
 }
+
+// メッセージ送信操作の適用
+function applySendMessage(state, data, timestamp) {
+    const { recipientId, content, type, isHtml } = data;
+    if (!recipientId || !content || !type) {
+        return { conflict: true, conflictType: 'bad_request', message: 'recipientId, content, and type are required for send_message.' };
+    }
+    if (!state.notifications) {
+        state.notifications = [];
+    }
+    state.notifications.push({
+        id: generateId(),
+        timestamp,
+        recipientId,
+        content,
+        type,
+        isHtml: isHtml || false
+    });
+    return { conflict: false };
+}
+
 
 // 送金操作の適用
 function applyTransfer(state, data, timestamp, userId, meta) {
