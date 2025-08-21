@@ -491,10 +491,6 @@
 </header>
 <main>
     <div class="grid">
-        <section class="card" id="votingPanel" style="display:none;">
-            <div class="hd" style="border-color: var(--accent-yellow);"><h3 style="color: var(--accent-yellow);">⚠️ 送金承認</h3></div>
-            <div class="bd" id="votingPanelBody"></div>
-        </section>
         <section class="card">
             <div class="hd"><h3>アカウント & 同期</h3></div>
             <div class="bd">
@@ -692,7 +688,6 @@
             currentUserId: null,
             jackpotUserId: '',
             lastRealUserId: null,
-            approval: {active: false, votes: {}},
             version: 14,
             vTick: 0
         };
@@ -1627,32 +1622,51 @@
                 toast('ログインが必要');
                 return;
             }
+
             amount = Math.floor(Number(amount));
             if (!(amount > 0)) {
                 toast('金額は1以上の整数');
                 return;
             }
+
             const to = findUserById(toId);
             if (!to) {
                 toast('送信先が不正');
                 return;
             }
+
             if (from.id === toId) {
                 toast('自分自身へは送れません');
                 return;
             }
-            if (isJackpot(to)) {
-                toast('ジャックポットへは直接送金できません');
-                return;
-            }
+
             if (from.balance < amount) {
                 toast('残高不足');
                 return;
             }
 
-            const operation = createOperation('request_transfer', { toId: to.id, amount: amount, memo: (memo || '').trim() });
+            // 操作をキューに追加
+            const operation = createOperation('transfer', {
+                toId: toId,
+                amount: amount,
+                memo: memo || ''
+            });
+
             queueOperation(operation);
-            toast('送金リクエストを送信しました。他ユーザーの承認待ちです。');
+
+            // ローカルで即座に実行（楽観的更新）
+            from.balance -= amount;
+            to.balance += amount;
+            addTx({
+                type: 'transfer',
+                from: from.id,
+                to: to.id,
+                amount,
+                memo: (memo || '').trim(),
+                pending: true // ペンディング状態をマーク
+            });
+
+            saveLocal(true); // 同期はschedulePushで行う
         }
 
     async function createListing(title, price, desc) {
@@ -2309,64 +2323,10 @@
             show(active ? active.dataset.tab : 'transfer');
         }
 
-        function renderVotingPanel() {
-            const panel = document.getElementById('votingPanel');
-            const body = document.getElementById('votingPanelBody');
-            const me = currentUser();
-
-            if (!state.approval || !state.approval.active || !me) {
-                panel.style.display = 'none';
-                return;
-            }
-
-            panel.style.display = 'block';
-            const { operation, votes, requesterId } = state.approval;
-            const { fromId, toId, amount, memo } = operation.data;
-
-            const fromUser = findUserById(fromId);
-            const toUser = findUserById(toId);
-
-            const yesVotes = Object.values(votes).filter(v => v === 'yes').length;
-            const noVotes = Object.values(votes).filter(v => v === 'no').length;
-
-            const hasVoted = votes[me.id];
-            const isRequester = me.id === requesterId;
-
-            body.innerHTML = `
-                <div class="panel">
-                    <p>
-                        <strong>${nameOf(fromId)}</strong> が <strong>${nameOf(toId)}</strong> へ
-                        <strong>${amount.toLocaleString()} coin</strong> の送金をリクエストしました。
-                    </p>
-                    <p style="font-size:12px; color: var(--muted);">メモ: ${memo || 'なし'}</p>
-                    <div class="tabbar">
-                        <button class="btn approve-vote" ${hasVoted || isRequester ? 'disabled' : ''}>承認</button>
-                        <button class="btn secondary reject-vote" ${hasVoted || isRequester ? 'disabled' : ''}>拒否</button>
-                    </div>
-                    <div style="margin-top: 10px;">
-                        <span class="chip">承認: ${yesVotes}</span>
-                        <span class="chip">拒否: ${noVotes}</span>
-                        ${hasVoted ? '<span class="chip" style="background: var(--accent-green); color: black;">投票済</span>' : ''}
-                        ${isRequester ? '<span class="chip">あなたはリクエスト者です</span>' : ''}
-                    </div>
-                </div>
-            `;
-
-            body.querySelector('.approve-vote').onclick = () => {
-                const op = createOperation('vote_on_transfer', { vote: 'yes' });
-                queueOperation(op);
-            };
-            body.querySelector('.reject-vote').onclick = () => {
-                const op = createOperation('vote_on_transfer', { vote: 'no' });
-                queueOperation(op);
-            };
-        }
-
         function renderAll() {
             renderSummary();
             renderWallets();
             renderHeaderUser();
-            renderVotingPanel();
             renderSelects();
             renderHistory();
             renderListings();
